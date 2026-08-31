@@ -110,6 +110,20 @@ pill shows the cadence actually being achieved rather than the one requested —
 pill reading 2s over a chart being drawn every 5 s is the kind of small lie that
 makes the chart beside it untrustworthy.
 
+### Window sizes
+
+On iPadOS a window is whatever width it is dragged to, so the layout follows the
+width rather than the device. Above 900 pt the sidebar is shown; below it the
+split view collapses to the detail alone and the tile row wraps. The threshold is
+268 pt of sidebar plus a detail column wide enough for two chart panels — below
+that the sidebar costs more than it gives.
+
+`NavigationSplitViewVisibility.automatic` is not enough on its own: it hides the
+sidebar on a 13-inch in portrait, where there is ample room for it. And because
+this app draws its own header rows and hides the navigation bar, the split view's
+built-in sidebar button goes with it — hence the explicit toggle, without which a
+narrow window has no way back to the cluster list.
+
 ### Known gaps
 
 - A fresh port-forward per scrape, which is where the 5.5 s goes. A tunnel held

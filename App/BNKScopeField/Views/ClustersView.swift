@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 import BNKKit
 
 struct ClustersView: View {
+    @Binding var columns: NavigationSplitViewVisibility
     @Environment(ClusterStore.self) private var store
     @State private var importing = false
     @State private var probing = false
@@ -45,10 +46,13 @@ struct ClustersView: View {
 
     private var toolbar: some View {
         HStack(spacing: 12) {
+            SidebarToggle(columns: $columns)
             Text("Clusters").font(.system(size: 19, weight: .semibold)).foregroundStyle(Theme.fg)
+                .fixedSize()
             Text("\(store.clusters.count) contexts · \(reachableCount) reachable")
                 .font(Theme.mono(11.5)).foregroundStyle(Theme.muted)
-            Spacer()
+                .lineLimit(1)
+            Spacer(minLength: 8)
             Button {
                 probing = true
                 Task { await store.probeAll(); probing = false }
@@ -60,8 +64,11 @@ struct ClustersView: View {
             .disabled(probing)
 
             Button { importing = true } label: {
-                Label("Import kubeconfig", systemImage: "plus")
-                    .font(.system(size: 12.5, weight: .semibold))
+                ViewThatFits(in: .horizontal) {
+                    Label("Import kubeconfig", systemImage: "plus")
+                        .font(.system(size: 12.5, weight: .semibold))
+                    Image(systemName: "plus").font(.system(size: 13, weight: .semibold))
+                }
             }
             .buttonStyle(.borderedProminent)
         }
@@ -96,10 +103,17 @@ private struct ClusterCard: View {
                 }
             }
 
-            HStack(spacing: 32) {
-                Field(key: "SERVER", value: cluster.context.server.absoluteString)
-                Field(key: "AUTH", value: authLabel)
-                Field(key: "CONTEXT", value: cluster.context.name)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 32) {
+                    Field(key: "SERVER", value: cluster.context.server.absoluteString)
+                    Field(key: "AUTH", value: authLabel)
+                    Field(key: "CONTEXT", value: cluster.context.name)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    Field(key: "SERVER", value: cluster.context.server.absoluteString)
+                    Field(key: "AUTH", value: authLabel)
+                    Field(key: "CONTEXT", value: cluster.context.name)
+                }
             }
 
             if let note {

@@ -2,6 +2,7 @@ import SwiftUI
 import BNKKit
 
 struct TMMLiveView: View {
+    @Binding var columns: NavigationSplitViewVisibility
     @Environment(ClusterStore.self) private var store
     @Environment(TelemetryEngine.self) private var engine
 
@@ -22,17 +23,29 @@ struct TMMLiveView: View {
 
     private var toolbar: some View {
         HStack(spacing: 12) {
+            SidebarToggle(columns: $columns)
             Text("TMM Live")
                 .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(Theme.fg)
+                .fixedSize()
             if let cluster = store.current {
                 Text(cluster.displayName)
                     .font(Theme.mono(11.5))
                     .foregroundStyle(Theme.muted)
+                    .lineLimit(1).truncationMode(.middle)
             }
-            Spacer()
-            Pill(text: "Direct", systemImage: "arrow.down.left.arrow.up.right", tone: .neutral)
-            statePill
+            Spacer(minLength: 8)
+            // The mode pill is the first thing to go when the window is too
+            // narrow for everything: it says the same thing on every screen,
+            // while the live pill is the one carrying state.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    Pill(text: "Direct", systemImage: "arrow.down.left.arrow.up.right", tone: .neutral)
+                    statePill
+                }
+                statePill
+            }
+            .fixedSize()
         }
         .padding(.horizontal, 20).frame(height: 58)
     }
@@ -90,8 +103,10 @@ struct TMMLiveView: View {
         }
     }
 
+    /// Wraps rather than squeezing. Four tiles across is right on a full-width
+    /// window and unreadable in a narrow one.
     private var tiles: some View {
-        HStack(spacing: 14) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 168), spacing: 14)], spacing: 14) {
             Tile(label: "TMM PODS", value: "\(engine.targets.count)", unit: "", sub: "scraped in parallel")
             Tile(label: "CURRENT CONNS",
                  value: ValueFormat.count(latest(.connections)), unit: "", sub: "client-side")

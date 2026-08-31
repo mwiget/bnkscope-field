@@ -20,17 +20,44 @@ struct RootView: View {
     @Environment(ClusterStore.self) private var store
     @Environment(TelemetryEngine.self) private var engine
     @State private var section: Section = .tmmLive
-    @State private var columns = NavigationSplitViewVisibility.all
+    /// `.automatic`, not `.all`.
+    ///
+    /// Pinning it open keeps a 268 pt sidebar in a window that may be 400 pt
+    /// wide, which is what made the app look like it had not adapted: the split
+    /// view was never allowed to collapse the sidebar into a slide-over the way
+    /// it does at narrow widths. On iPadOS a window is any size the user drags
+    /// it to, so the split view has to be trusted to make that call.
+    @State private var columns = NavigationSplitViewVisibility.automatic
+
+    /// Below this the sidebar costs more than it gives: 268 pt of chrome plus a
+    /// detail column too narrow for two chart panels side by side.
+    private static let sidebarWidthThreshold: CGFloat = 900
 
     var body: some View {
+        GeometryReader { geometry in
+            split
+                // Fires only when the window crosses the threshold, not on every
+                // pixel of a drag, so a deliberate toggle survives until the
+                // window actually changes shape. `.automatic` alone gets this
+                // wrong on a 13-inch in portrait: it hides a sidebar there is
+                // ample room for.
+                .onChange(of: geometry.size.width >= Self.sidebarWidthThreshold, initial: true) { _, wide in
+                    withAnimation(.snappy(duration: 0.25)) {
+                        columns = wide ? .all : .detailOnly
+                    }
+                }
+        }
+    }
+
+    private var split: some View {
         NavigationSplitView(columnVisibility: $columns) {
             Sidebar(section: $section)
                 .navigationSplitViewColumnWidth(min: 260, ideal: 268, max: 320)
         } detail: {
             Group {
                 switch section {
-                case .tmmLive:            TMMLiveView()
-                case .clusters, .overview: ClustersView()
+                case .tmmLive:            TMMLiveView(columns: $columns)
+                case .clusters, .overview: ClustersView(columns: $columns)
                 }
             }
             .background(Theme.bg)
@@ -186,5 +213,33 @@ struct StatusDot: View {
             .fill(color)
             .frame(width: size, height: size)
             .overlay { if glow { Circle().stroke(color.opacity(0.18), lineWidth: 3) } }
+    }
+}
+
+
+/// Shows and hides the sidebar.
+///
+/// Needed because this app draws its own header rows and hides the navigation
+/// bar, which takes the split view's built-in toggle with it. In a window narrow
+/// enough for the sidebar to collapse — and on iPadOS a window is whatever width
+/// it is dragged to — that left no way back to the cluster list.
+struct SidebarToggle: View {
+    @Binding var columns: NavigationSplitViewVisibility
+
+    var body: some View {
+        Button {
+            withAnimation(.snappy(duration: 0.25)) {
+                columns = columns == .detailOnly ? .all : .detailOnly
+            }
+        } label: {
+            Image(systemName: "sidebar.leading")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Theme.muted)
+                .frame(width: 32, height: 32)
+                .background(Theme.secondary, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(columns == .detailOnly ? "Show clusters" : "Hide clusters")
     }
 }

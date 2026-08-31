@@ -19,7 +19,11 @@ struct TMMLiveView: View {
         }
         .background(Theme.bg)
         .toolbar(.hidden, for: .navigationBar)
-        .task(id: store.selected) { await follow() }
+        // Keyed on the probe as well as the selection. Installing an exporter
+        // changes what there is to scrape without changing which cluster is
+        // selected, and the first version only watched the selection — so a
+        // successful install left the screen sitting on its own install prompt.
+        .task(id: "\(store.selected ?? "")#\(store.current?.probeGeneration ?? 0)") { await follow() }
     }
 
     // MARK: - Chrome

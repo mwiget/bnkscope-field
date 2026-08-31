@@ -77,13 +77,19 @@ struct ExporterPanel: View {
 
     private var installPrompt: some View {
         VStack(spacing: 14) {
-            Text("Nothing to scrape here")
+            Text(missing.isEmpty ? "Exporter added" : "Nothing to scrape here")
                 .font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.fg)
-            Text("\(pods.count) f5-tmm pod\(pods.count == 1 ? "" : "s") on this cluster, none carrying the exporter. Adding it attaches an ephemeral container that reads the tmstat segment read-only and serves /metrics. TMM keeps running — nothing restarts.")
+            Text(missing.isEmpty
+                 ? "The exporter is in. TMM Live is starting up — the first samples arrive within a scrape or two."
+                 : "\(missing.count) of \(pods.count) f5-tmm pod\(pods.count == 1 ? "" : "s") on this cluster carry no exporter. Adding it attaches an ephemeral container that reads the tmstat segment read-only and serves /metrics. TMM keeps running — nothing restarts.")
                 .font(.system(size: 13)).foregroundStyle(Theme.muted)
                 .multilineTextAlignment(.center).frame(maxWidth: 470)
-            Button(busy ? "Adding…" : "Add the exporter") { Task { await install() } }
-                .buttonStyle(.borderedProminent).disabled(busy)
+            if !missing.isEmpty {
+                Button(busy ? "Adding…" : "Add the exporter") { Task { await install() } }
+                    .buttonStyle(.borderedProminent).disabled(busy)
+            } else {
+                ProgressView()
+            }
             Text("It is gone again when a pod is recreated, and nothing re-adds it.")
                 .font(.system(size: 11.5)).foregroundStyle(Theme.faint)
         }
@@ -137,7 +143,18 @@ struct ExporterPanel: View {
     // MARK: - Doing it
 
     private func install() async {
-        guard let cluster = store.current, let client = try? cluster.client() else { return }
+        guard let cluster = store.current else { return }
+        let client: KubeClient
+        do {
+            client = try cluster.client()
+        } catch {
+            // Returning quietly here is indistinguishable from a tap that did
+            // nothing, which is what a silent failure looks like from the far
+            // side of the screen.
+            report = Report(title: "Could not reach the cluster",
+                            lines: [TelemetryEngine.brief(error)], bad: true)
+            return
+        }
         busy = true
         let outcome = await Exporter.install(into: missing, clusterLabel: cluster.displayName, using: client)
         await cluster.probe()
@@ -147,7 +164,15 @@ struct ExporterPanel: View {
     }
 
     private func remove() async {
-        guard let cluster = store.current, let client = try? cluster.client() else { return }
+        guard let cluster = store.current else { return }
+        let client: KubeClient
+        do {
+            client = try cluster.client()
+        } catch {
+            report = Report(title: "Could not reach the cluster",
+                            lines: [TelemetryEngine.brief(error)], bad: true)
+            return
+        }
         busy = true
         typed = ""
         engine.stop()

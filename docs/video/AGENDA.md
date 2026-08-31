@@ -46,7 +46,9 @@ inside `CoreSimulatorService`, and every later take fails with *"Host recording
 is already in progress"*. Killing the `simctl` wrapper changes nothing — it is
 not what holds it. `record.sh` detects the empty file and restarts the service.
 
-**Orientation.** `simctl` captures the framebuffer in portrait whatever the app
-is doing, so takes come out sideways and are transposed during assembly. The
-direction has not been stable across simulator reboots; check one frame per take
-before assembling rather than assuming.
+**Orientation — do not transpose.** `simctl` stores the frames portrait and tags
+the stream `rotation=90`; ffmpeg applies that on decode, so frames arrive
+landscape already. Rotating them "back upright" turns correct footage on its
+side, and every single-frame experiment looks wrong because it is rotating
+footage that was already right. Check `ffprobe -show_entries stream_side_data=rotation`
+before reaching for a filter.

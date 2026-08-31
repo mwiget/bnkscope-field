@@ -53,11 +53,13 @@ for row in "${MANIFEST[@]}"; do
         # measures from wherever it landed rather than from the frame asked for.
         # Segments came out anywhere from half to double their intended length.
         #
-        # transpose=2 because simctl records the framebuffer in portrait however
-        # the app is oriented; checked against a frame, since the other direction
-        # is equally plausible and equally sideways.
+        # No transpose. simctl stores the frames portrait but tags the stream
+        # rotation=90, and ffmpeg applies that on decode — so the frames arrive
+        # landscape already and rotating them "back upright" turns correct
+        # footage on its side. Four single-frame experiments all looked wrong
+        # because every one of them was rotating footage that was already right.
         ffmpeg -v error -i "$TAKES/$take.mp4" -ss "$start" -t "$share" \
-            -vf "transpose=2,scale=1440:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30" \
+            -vf "scale=1440:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30" \
             -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -an \
             "$OUT/seg/${scene}_$n.mp4" -y
         got=$(dur "$OUT/seg/${scene}_$n.mp4")

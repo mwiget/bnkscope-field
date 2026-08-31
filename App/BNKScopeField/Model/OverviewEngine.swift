@@ -134,7 +134,7 @@ final class OverviewEngine {
             if !missing.isEmpty {
                 findings.append(Finding(
                     severity: .warning, title: "No exporter on \(missing.count) TMM pod\(missing.count == 1 ? "" : "s")",
-                    detail: "TMM Live has nothing to scrape there. Telemetry can add it.",
+                    detail: "TMM Live has nothing to scrape there, and is where you add it.",
                     pod: nil, namespace: nil))
             }
         }

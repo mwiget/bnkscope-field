@@ -12,12 +12,18 @@
 
 /* Begin PBXFileReference section */
 		C5BA2F1BDDF9000888BF07C4 /* bnkscope Field.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "bnkscope Field.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		D625CB004B964F5D288C7996 /* BNKScopeFieldUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BNKScopeFieldUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		98962CA057DBE5A307FD940A /* BNKScopeField */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = BNKScopeField;
+			sourceTree = "<group>";
+		};
+		0D62319AE837A17BAF65F083 /* BNKScopeFieldUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = BNKScopeFieldUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -38,6 +44,7 @@
 			isa = PBXGroup;
 			children = (
 				98962CA057DBE5A307FD940A /* BNKScopeField */,
+				0D62319AE837A17BAF65F083 /* BNKScopeFieldUITests */,
 				BFE00B156DCFC34C4751A6E5 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -46,6 +53,7 @@
 			isa = PBXGroup;
 			children = (
 				C5BA2F1BDDF9000888BF07C4 /* bnkscope Field.app */,
+				D625CB004B964F5D288C7996 /* BNKScopeFieldUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -74,7 +82,43 @@
 			productReference = C5BA2F1BDDF9000888BF07C4 /* bnkscope Field.app */;
 			productType = "com.apple.product-type.application";
 		};
+		69E35C04D2412085B9A2E051 /* BNKScopeFieldUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C62FF30A1A76566561931696;
+			buildPhases = (
+				A6B359E8F531184B98E81F52,
+			);
+			buildRules = ();
+			dependencies = (
+				A5E68FBC4611A0CC26FB16A9,
+			);
+			fileSystemSynchronizedGroups = (
+				0D62319AE837A17BAF65F083 /* BNKScopeFieldUITests */,
+			);
+			name = BNKScopeFieldUITests;
+			productName = BNKScopeFieldUITests;
+			productReference = D625CB004B964F5D288C7996 /* BNKScopeFieldUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
+
+/* Begin PBXContainerItemProxy section */
+		9C9A8BF70AE671D1171429F8 = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 98F54143AB4E86B28C3AFEE0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0E8A3AD980EC179856012B7E;
+			remoteInfo = BNKScopeField;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		A5E68FBC4611A0CC26FB16A9 = {
+			isa = PBXTargetDependency;
+			target = 0E8A3AD980EC179856012B7E /* BNKScopeField */;
+			targetProxy = 9C9A8BF70AE671D1171429F8;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXProject section */
 		98F54143AB4E86B28C3AFEE0 /* Project object */ = {
@@ -102,6 +146,7 @@
 			projectRoot = "";
 			targets = (
 				0E8A3AD980EC179856012B7E /* BNKScopeField */,
+				69E35C04D2412085B9A2E051 /* BNKScopeFieldUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -117,6 +162,12 @@
 
 /* Begin PBXSourcesBuildPhase section */
 		BCE16DD0260827ECF338C787 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A6B359E8F531184B98E81F52 = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = ();
@@ -206,6 +257,34 @@
 			};
 			name = Release;
 		};
+		DB840D5F555A067F92027526 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = HGECWA98QL;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mwiget.bnkscope.field.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TARGETED_DEVICE_FAMILY = 2;
+				TEST_TARGET_NAME = BNKScopeField;
+			};
+			name = Debug;
+		};
+		C5DC9F2980F7A44AF7608185 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = HGECWA98QL;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mwiget.bnkscope.field.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TARGETED_DEVICE_FAMILY = 2;
+				TEST_TARGET_NAME = BNKScopeField;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -223,6 +302,15 @@
 			buildConfigurations = (
 				5EFE6D0A9526FE7701CFA3FC /* Debug */,
 				DBD8C4BBA396ED346071B078 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C62FF30A1A76566561931696 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DB840D5F555A067F92027526 /* Debug */,
+				C5DC9F2980F7A44AF7608185 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

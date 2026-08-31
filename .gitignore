@@ -2,3 +2,5 @@
 .swiftpm/
 *.xcuserdatad
 DerivedData/
+docs/video/build/
+docs/video/takes/

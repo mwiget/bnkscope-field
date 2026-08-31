@@ -45,6 +45,14 @@ final class ManagedCluster: Identifiable {
     var reach: Reach = .unprobed
     var roles: Set<Role> = []
     var tmmPods: [K8s.Pod] = []
+    /// Bumped every time probing finishes.
+    ///
+    /// A screen that loads from what probing discovered cannot key its work on
+    /// the cluster's identity alone: the first render happens before the probe
+    /// answers, and selecting the same cluster again afterwards is not a change
+    /// SwiftUI will notice. Keying on this makes "the facts changed" a distinct
+    /// event from "the selection changed".
+    private(set) var probeGeneration = 0
 
     enum Role: String, CaseIterable, Comparable {
         case bnk = "BNK", dpf = "DPF", nico = "NICo"
@@ -52,6 +60,7 @@ final class ManagedCluster: Identifiable {
     }
 
     private var cached: KubeClient?
+    private var probeInFlight: Task<Void, Never>?
 
     init(context: Kubeconfig.Context, sourceFile: String) {
         self.context = context
@@ -76,7 +85,24 @@ final class ManagedCluster: Identifiable {
     /// Roles are read from pod labels rather than namespace names, because on a
     /// real deployment these live on different clusters and the namespaces vary
     /// by install shape — the same reason bnkscope detects them this way.
+    /// Probe, or join the probe already running.
+    ///
+    /// Two callers ask for this concurrently — the store probes everything at
+    /// launch while a screen probes the cluster it needs — and two probes
+    /// interleaving on one cluster left it reporting "no route from this iPad"
+    /// while its data sat on the screen beside the message.
     func probe() async {
+        if let probeInFlight {
+            await probeInFlight.value
+            return
+        }
+        let task = Task { await performProbe() }
+        probeInFlight = task
+        await task.value
+        probeInFlight = nil
+    }
+
+    private func performProbe() async {
         guard isUsable else { return }
         do {
             let c = try client()
@@ -102,6 +128,7 @@ final class ManagedCluster: Identifiable {
             reach = .unreachable(Self.explain(error))
             tmmPods = []
         }
+        probeGeneration += 1
     }
 
     /// A URLError says almost nothing useful on its own. The two cases that

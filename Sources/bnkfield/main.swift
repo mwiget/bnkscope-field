@@ -183,6 +183,32 @@ case "exec":
         print("\n[failed] \(error)")
     }
 
+case "nico":
+    guard args.count >= 2 else { die(usage) }
+    let client = try KubeClient(context: try loadContext(args[0], args[1]))
+    let pods = try await client.pods(namespace: "nico-system")
+    print("control plane: \(pods.count) pods")
+    for p in pods where p.status?.phase == "Running" {
+        print("  \(pad(p.metadata.name, 44)) \(p.spec?.containers.first?.image ?? "")")
+    }
+    if let secret = try? await client.secret(namespace: "nico-system", name: "tmm-lb-admin-cert"),
+       let pem = secret.pem("tls.crt"), let cert = try? Certificate.first(inPEM: pem) {
+        print("admin cert: subject=\(cert.subject ?? "?") issuer=\(cert.issuer ?? "?")")
+        print("            notAfter=\(cert.notAfter) daysLeft=\(cert.daysRemaining) expired=\(cert.isExpired)")
+    }
+    let tcps = (try? await client.tenantControlPlanes()) ?? []
+    print("tenant control planes: \(tcps.count)")
+    for t in tcps {
+        print("  \(pad(t.metadata.name, 24)) \(t.status?.kubernetesResources?.version?.version ?? "?") " +
+              "\(t.isReady ? "Ready" : "not ready")  \(t.status?.controlPlaneEndpoint ?? "-")")
+        if let ca = t.status?.certificates?["ca"]?.secretName,
+           let ns = t.metadata.namespace,
+           let secret = try? await client.secret(namespace: ns, name: ca),
+           let pem = secret.pem("ca.crt"), let cert = try? Certificate.first(inPEM: pem) {
+            print("      ca: \(cert.subject ?? "?") expires \(cert.notAfter) (\(cert.daysRemaining) days)")
+        }
+    }
+
 default:
     print(usage); exit(2)
 }

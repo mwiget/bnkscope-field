@@ -6,6 +6,7 @@ struct BNKScopeFieldApp: App {
     @State private var engine = TelemetryEngine()
     @State private var logs = LogsEngine()
     @State private var exec = ExecEngine()
+    @State private var nico = NICoEngine()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -15,6 +16,7 @@ struct BNKScopeFieldApp: App {
                 .environment(engine)
                 .environment(logs)
                 .environment(exec)
+                .environment(nico)
                 .preferredColorScheme(.dark)
                 .tint(Theme.primary)
                 .task { store.load(); await store.probeAll() }

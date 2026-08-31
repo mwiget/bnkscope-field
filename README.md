@@ -234,6 +234,33 @@ Run it with `swift Tools/make-icon.swift <out.png>` and drop the result into the
 asset catalogue. It fills the square edge to edge — iOS masks its own corners,
 and drawing rounded ones underneath that gives a double rounding.
 
+### NICo
+
+The screen appears only on a cluster running NICo, the way bnkscope's tab does.
+Most of what the desktop build shows there turns out not to need Forge at all:
+
+| | source |
+|---|---|
+| nico-api and lb-provider health, images, restarts | plain REST |
+| Admin mTLS certificate and its expiry | the `tmm-lb-admin-cert` Secret, parsed |
+| Tenant control planes, version, readiness, endpoint | Kamaji CRD, plain REST |
+| Tenant cluster CA expiry | each tenant's `ca` Secret |
+| nico-api's own counters | a tunnel to its metrics port, same as TMM's exporter |
+
+Certificate dates are parsed from DER in `Certificate.swift` rather than read
+through Security, because there is no public way to get a certificate's validity
+on iOS: `SecCertificateCopyValues` is macOS only. Expiry is the most useful fact
+about a lab certificate, so it is worth the ASN.1.
+
+The one thing missing is the Forge tenant and load-balancer inventory, which
+needs gRPC with server reflection and a dynamic protobuf stack. That belongs in
+the collector, and the screen says so rather than leaving a blank space.
+
+**The cross-cluster link is the point.** A tenant control plane's endpoint is
+matched against the servers Field already holds, so `dpu-cplane-tenant1` in the
+sidebar is shown as the cluster that this control plane runs. Nothing else in
+the app says the two are related.
+
 ### Known gaps
 
 - Direct mode only. The in-cluster collector, logs and the pod terminal are not

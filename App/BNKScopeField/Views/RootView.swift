@@ -5,6 +5,7 @@ enum Section: String, CaseIterable, Identifiable {
     case tmmLive  = "TMM Live"
     case clusters = "Clusters"
     case logs = "Logs"
+    case nico = "NICo"
     case terminal = "Terminal"
     case telemetry = "Telemetry"
 
@@ -16,6 +17,7 @@ enum Section: String, CaseIterable, Identifiable {
         case .tmmLive:  return "waveform.path.ecg"
         case .clusters: return "square.stack.3d.up"
         case .logs: return "text.alignleft"
+        case .nico: return "network"
         case .terminal: return "apple.terminal"
         case .telemetry: return "square.3.layers.3d"
         }
@@ -64,6 +66,7 @@ struct RootView: View {
                 switch section {
                 case .tmmLive:             TMMLiveView(columns: $columns)
                 case .logs:                LogsView(columns: $columns)
+                case .nico:                NICoView(columns: $columns)
                 case .terminal:            TerminalView(columns: $columns)
                 case .telemetry:           TelemetryView(columns: $columns)
                 case .clusters, .overview: ClustersView(columns: $columns)
@@ -78,6 +81,12 @@ struct RootView: View {
 private struct Sidebar: View {
     @Environment(ClusterStore.self) private var store
     @Binding var section: Section
+
+    /// NICo appears only on a cluster running it — the same shape as bnkscope's
+    /// tab, and better than a screen that is permanently empty on most clusters.
+    private var visibleSections: [Section] {
+        Section.allCases.filter { $0 != .nico || store.current?.roles.contains(.nico) == true }
+    }
 
     var body: some View {
         @Bindable var store = store
@@ -98,7 +107,7 @@ private struct Sidebar: View {
             .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 14)
 
             VStack(spacing: 2) {
-                ForEach(Section.allCases) { item in
+                ForEach(visibleSections) { item in
                     Button { section = item } label: {
                         HStack(spacing: 11) {
                             Image(systemName: item.symbol)

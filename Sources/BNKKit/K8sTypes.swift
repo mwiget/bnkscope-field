@@ -112,6 +112,48 @@ public enum K8s {
         public let metadata: ObjectMeta
     }
 
+    public struct Secret: Decodable, Sendable {
+        public let metadata: ObjectMeta
+        public let data: [String: String]?
+
+        /// Secret values are base64 in the API on top of whatever they already
+        /// are, so a PEM arrives doubly wrapped.
+        public func pem(_ key: String) -> Data? {
+            guard let encoded = data?[key] else { return nil }
+            return Data(base64Encoded: encoded, options: .ignoreUnknownCharacters)
+        }
+    }
+
+    /// A Kamaji tenant control plane — one hosted Kubernetes control plane, which
+    /// is how the DPF tenant clusters are run.
+    public struct TenantControlPlane: Decodable, Sendable {
+        public let metadata: ObjectMeta
+        public let status: Status?
+
+        public struct Status: Decodable, Sendable {
+            public let controlPlaneEndpoint: String?
+            public let kubernetesResources: Resources?
+            public let certificates: [String: CertificateRef]?
+            public let kubeconfig: Kubeconfigs?
+        }
+        public struct Resources: Decodable, Sendable {
+            public let version: Version?
+        }
+        public struct Version: Decodable, Sendable {
+            public let status: String?
+            public let version: String?
+        }
+        public struct CertificateRef: Decodable, Sendable {
+            public let secretName: String?
+            public let lastUpdate: Date?
+        }
+        public struct Kubeconfigs: Decodable, Sendable {
+            public let admin: CertificateRef?
+        }
+
+        public var isReady: Bool { status?.kubernetesResources?.version?.status == "Ready" }
+    }
+
     public struct Node: Decodable, Sendable {
         public let metadata: ObjectMeta
         public let status: Status?
@@ -143,6 +185,20 @@ extension KubeClient {
 
     public func nodes() async throws -> [K8s.Node] {
         try await getJSON(K8s.List<K8s.Node>.self, "/api/v1/nodes").items
+    }
+
+    public func secret(namespace: String, name: String) async throws -> K8s.Secret {
+        try await getJSON(K8s.Secret.self, "/api/v1/namespaces/\(namespace)/secrets/\(name)")
+    }
+
+    /// Kamaji's tenant control planes, cluster-wide.
+    ///
+    /// This is the link between the two clusters in the sidebar: infra hosts
+    /// tenant1's control plane, and the endpoint here is the one in tenant1's
+    /// kubeconfig. Nothing else in the app says they are related.
+    public func tenantControlPlanes() async throws -> [K8s.TenantControlPlane] {
+        try await getJSON(K8s.List<K8s.TenantControlPlane>.self,
+                          "/apis/kamaji.clastix.io/v1alpha1/tenantcontrolplanes").items
     }
 
     public func namespaces() async throws -> [String] {

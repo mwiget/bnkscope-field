@@ -221,7 +221,7 @@ public enum Identity {
 }
 
 /// Just enough DER to strip the two wrappers `SecKeyCreateWithData` will not take.
-enum DER {
+public enum DER {
     /// SEC1 `ECPrivateKey ::= SEQUENCE { version, privateKey OCTET STRING, [0] params, [1] publicKey BIT STRING }`
     /// → the X9.63 form Security wants: `04 || X || Y || d`.
     static func ecPrivateKeyFromSEC1(_ der: Data) throws -> Data {
@@ -254,27 +254,27 @@ enum DER {
         return (inner, alg.range(of: ecOID) != nil)
     }
 
-    struct Parser {
+    public struct Parser {
         let bytes: Data
         var i: Data.Index
-        init(_ d: Data) { bytes = d; i = d.startIndex }
+        public init(_ d: Data) { bytes = d; i = d.startIndex }
 
-        func peek() -> UInt8? { i < bytes.endIndex ? bytes[i] : nil }
+        public func peek() -> UInt8? { i < bytes.endIndex ? bytes[i] : nil }
 
-        mutating func enter(_ tag: UInt8) throws {
+        public mutating func enter(_ tag: UInt8) throws {
             let body = try read(tag)
             // Re-base onto the contents of the constructed value.
             self = Parser(body)
         }
 
-        mutating func read(_ tag: UInt8) throws -> Data {
+        public mutating func read(_ tag: UInt8) throws -> Data {
             guard i < bytes.endIndex, bytes[i] == tag else {
                 throw Identity.Error.badPrivateKey("expected DER tag 0x\(String(tag, radix: 16))")
             }
             return try readAny()
         }
 
-        mutating func readAny() throws -> Data {
+        public mutating func readAny() throws -> Data {
             guard i < bytes.endIndex else { throw Identity.Error.badPrivateKey("truncated DER") }
             i = bytes.index(after: i)                       // tag
             guard i < bytes.endIndex else { throw Identity.Error.badPrivateKey("truncated DER length") }

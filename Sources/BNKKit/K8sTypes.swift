@@ -1,0 +1,116 @@
+import Foundation
+
+/// The slices of the Kubernetes API Field reads.
+///
+/// Hand-written rather than generated: the full openapi schema is megabytes and
+/// almost none of it is used. Every field here is one the UI actually renders.
+public enum K8s {
+    public struct VersionInfo: Decodable, Sendable {
+        public let gitVersion: String
+        public let platform: String?
+    }
+
+    public struct ObjectMeta: Decodable, Sendable {
+        public let name: String
+        public let namespace: String?
+        public let labels: [String: String]?
+        public let creationTimestamp: Date?
+    }
+
+    public struct List<Item: Decodable & Sendable>: Decodable, Sendable {
+        public let items: [Item]
+    }
+
+    public struct Pod: Decodable, Sendable {
+        public let metadata: ObjectMeta
+        public let spec: Spec?
+        public let status: Status?
+
+        public struct Spec: Decodable, Sendable {
+            public let nodeName: String?
+            public let containers: [Container]
+        }
+        public struct Container: Decodable, Sendable {
+            public let name: String
+            public let image: String?
+        }
+        public struct Status: Decodable, Sendable {
+            public let phase: String?
+            public let podIP: String?
+            public let containerStatuses: [ContainerStatus]?
+            public let ephemeralContainerStatuses: [ContainerStatus]?
+        }
+        public struct ContainerStatus: Decodable, Sendable {
+            public let name: String
+            public let ready: Bool?
+            public let restartCount: Int?
+            public let image: String?
+        }
+
+        public var node: String { spec?.nodeName ?? "—" }
+        public var ready: String {
+            let cs = status?.containerStatuses ?? []
+            return "\(cs.filter { $0.ready == true }.count)/\(cs.count)"
+        }
+        /// The exporter is injected as an ephemeral container, so its presence is
+        /// read from a different list than the pod's declared containers.
+        public func hasEphemeral(_ name: String) -> Bool {
+            (status?.ephemeralContainerStatuses ?? []).contains { $0.name == name }
+        }
+    }
+
+    public struct Node: Decodable, Sendable {
+        public let metadata: ObjectMeta
+        public let status: Status?
+
+        public struct Status: Decodable, Sendable {
+            public let nodeInfo: NodeInfo?
+            public let conditions: [Condition]?
+        }
+        public struct NodeInfo: Decodable, Sendable {
+            public let architecture: String?
+            public let osImage: String?
+            public let kubeletVersion: String?
+        }
+        public struct Condition: Decodable, Sendable {
+            public let type: String
+            public let status: String
+        }
+
+        public var isReady: Bool {
+            (status?.conditions ?? []).contains { $0.type == "Ready" && $0.status == "True" }
+        }
+    }
+}
+
+extension KubeClient {
+    public func version() async throws -> K8s.VersionInfo {
+        try await getJSON(K8s.VersionInfo.self, "/version")
+    }
+
+    public func nodes() async throws -> [K8s.Node] {
+        try await getJSON(K8s.List<K8s.Node>.self, "/api/v1/nodes").items
+    }
+
+    public func pods(namespace: String? = nil, labelSelector: String? = nil) async throws -> [K8s.Pod] {
+        let path = namespace.map { "/api/v1/namespaces/\($0)/pods" } ?? "/api/v1/pods"
+        var q: [String: String] = [:]
+        if let labelSelector { q["labelSelector"] = labelSelector }
+        return try await getJSON(K8s.List<K8s.Pod>.self, path, query: q).items
+    }
+
+    /// Scrape a port inside a pod, through the apiserver.
+    ///
+    /// Asks for gzip and inflates it here — on a busy tmm this is the difference
+    /// between 286 KB and 14 KB on the wire, per pod, per scrape.
+    public func scrape(namespace: String, pod: String, port: Int, path: String = "/metrics") async throws -> [Sample] {
+        let tunnel = try portForward(namespace: namespace, pod: pod, port: port)
+        defer { Task { await tunnel.close() } }
+        let reply = try await tunnel.httpGet(path, headers: ["Accept-Encoding": "gzip"])
+        guard reply.status == 200 else {
+            throw KubeClient.Failure.http(reply.status, String(decoding: reply.body, as: UTF8.self))
+        }
+        let body = reply.isGzipped ? try Gzip.inflate(reply.body) : reply.body
+        return PromText.parse(body)
+    }
+}

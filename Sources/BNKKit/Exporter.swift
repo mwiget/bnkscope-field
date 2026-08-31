@@ -44,6 +44,17 @@ public enum Exporter {
     /// A pod can carry both, if someone injected over a cluster that already had
     /// the sidecar in its template. The permanent one is the durable fact and
     /// the one that decides what removal can achieve.
+    /// The image the exporter in this pod is actually running.
+    ///
+    /// Not the same thing as `Exporter.image`, which is only what this app would
+    /// install. On a cluster built with tmmscope the running one is
+    /// `ghcr.io/mwiget/tmm-stat-exporter` — a different repository — and showing
+    /// the pinned name beside a pod running something else is a quiet lie.
+    public static func runningImage(in pod: K8s.Pod) -> String? {
+        let declared = (pod.spec?.containers ?? []) + (pod.spec?.ephemeralContainers ?? [])
+        return declared.first { $0.name == containerName }?.image
+    }
+
     public static func installation(in pod: K8s.Pod) -> Installation {
         if (pod.spec?.containers ?? []).contains(where: { $0.name == containerName }) {
             return .permanent(owner: nil)
@@ -133,12 +144,16 @@ public enum Exporter {
     }
 
     /// Add the exporter to every pod that does not have one.
+    /// `dryRun` asks the apiserver to validate and discard. It is how the
+    /// injection can be checked against a real cluster without injecting: every
+    /// admission plugin runs, the container spec is validated, and nothing is
+    /// written.
     public static func install(into pods: [K8s.Pod], clusterLabel: String,
-                               using client: KubeClient) async -> Outcome {
+                               using client: KubeClient, dryRun: Bool = false) async -> Outcome {
         var outcome = Outcome()
         for pod in pods {
             guard let namespace = pod.metadata.namespace else { continue }
-            guard installation(in: pod) == .absent else {
+            guard dryRun || installation(in: pod) == .absent else {
                 outcome.skipped.append(pod.metadata.name)
                 continue
             }
@@ -151,6 +166,7 @@ public enum Exporter {
                 try await client.send(
                     "PATCH",
                     "/api/v1/namespaces/\(namespace)/pods/\(pod.metadata.name)/ephemeralcontainers",
+                    query: dryRun ? ["dryRun": "All"] : [:],
                     body: body,
                     contentType: "application/strategic-merge-patch+json")
                 outcome.changed.append(pod.metadata.name)

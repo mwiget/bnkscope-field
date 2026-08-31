@@ -167,6 +167,18 @@ pushes nowhere, and `/metrics` is exactly what Field reads back through the
 apiserver. There is no Prometheus to point at, so the heuristic that guesses a
 reachable host address for one is not needed either.
 
+The screen shows the image each pod is **actually running**, not the one this app
+pins. They are often different: a cluster built with tmmscope carries
+`ghcr.io/mwiget/tmm-stat-exporter`, a different repository from the
+`bnkscope-tmm-stat-exporter` Field would install, and printing the pinned name
+beside a pod running something else is a quiet lie.
+
+The injection is validated against a real cluster without injecting:
+`bnkfield install-dryrun` sends the identical patch with `?dryRun=All`, so every
+admission plugin runs and nothing is written. On dpu-cplane-tenant1 the apiserver
+accepts the spec — volumes, securityContext, downward-API env and all — under a
+name that does not collide with the exporter already there.
+
 Removal is deliberately harder than installation, and sometimes refused outright.
 An ephemeral container cannot be taken out of a running pod, so clearing one
 means recreating the pod — a typed confirmation, not a click, because it drops
@@ -174,7 +186,9 @@ dataplane traffic. And where the exporter is **in the pod template** — which i
 the case on the DPF cluster this was built against — removal is declined rather
 than attempted: deleting the pods would drop traffic and the exporter would come
 straight back with the replacements. The screen names the workload it has to be
-removed from instead.
+removed from — "Defined in DaemonSet …" — rather than saying "nothing to do",
+which was the first wording and is a contradiction when there plainly is
+something there.
 
 ### Panels
 

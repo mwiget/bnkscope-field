@@ -209,6 +209,41 @@ case "nico":
         }
     }
 
+case "install-dryrun":
+    // Validates the ephemeral-container patch against a live cluster without
+    // writing anything, so the install path can be trusted before a cluster
+    // that actually needs it turns up.
+    guard args.count >= 2 else { die(usage) }
+    let client = try KubeClient(context: try loadContext(args[0], args[1]))
+    let pods = try await client.pods(labelSelector: "app=f5-tmm")
+    print("dry-running the injection against \(pods.count) f5-tmm pod(s)")
+    let outcome = await Exporter.install(into: pods, clusterLabel: "dryrun",
+                                         using: client, dryRun: true)
+    for pod in outcome.changed { print("  accepted: \(pod)") }
+    for pod in outcome.skipped { print("  skipped:  \(pod)") }
+    for (pod, reason) in outcome.failed { print("  REJECTED: \(pod)\n            \(reason.prefix(200))") }
+
+    // The pods here already carry an exporter, so the real name collides. Run
+    // the identical spec under another name to prove the rest of it -- volumes,
+    // securityContext, env, downward API -- is what the apiserver will accept.
+    print("\nsame spec, name changed, to validate the rest of it:")
+    for pod in pods.prefix(1) {
+        guard let ns = pod.metadata.namespace else { continue }
+        var spec = Exporter.container(clusterLabel: "dryrun", dssmCert: true)
+        spec["name"] = "bnkfield-dryrun"
+        let patch: [String: Any] = ["spec": ["ephemeralContainers": [spec]]]
+        do {
+            _ = try await client.send("PATCH",
+                "/api/v1/namespaces/\(ns)/pods/\(pod.metadata.name)/ephemeralcontainers",
+                query: ["dryRun": "All"],
+                body: try JSONSerialization.data(withJSONObject: patch),
+                contentType: "application/strategic-merge-patch+json")
+            print("  ACCEPTED by \(pod.metadata.name) — nothing was written")
+        } catch {
+            print("  REJECTED: \(String(describing: error).prefix(300))")
+        }
+    }
+
 default:
     print(usage); exit(2)
 }

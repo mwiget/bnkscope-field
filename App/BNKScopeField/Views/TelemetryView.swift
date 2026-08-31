@@ -10,6 +10,9 @@ struct TelemetryView: View {
     @State private var confirmingRemoval = false
     @State private var typed = ""
     @State private var report: Report?
+    /// The workload a permanent exporter is defined in. Resolved on load so the
+    /// Remove card can name it rather than shrug.
+    @State private var owners: [String] = []
 
     private struct Report: Identifiable {
         let id = UUID()
@@ -51,6 +54,7 @@ struct TelemetryView: View {
         }
         .background(Theme.bg)
         .toolbar(.hidden, for: .navigationBar)
+        .task(id: "\(store.selected ?? "")#\(store.current?.probeGeneration ?? 0)") { await findOwners() }
         .alert("Recreate the TMM pods?", isPresented: $confirmingRemoval) {
             TextField("cluster name", text: $typed)
                 .textInputAutocapitalization(.never)
@@ -100,7 +104,6 @@ struct TelemetryView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Text("Exporter").font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.fg)
-                Text(Exporter.image).font(Theme.mono(11)).foregroundStyle(Theme.faint).lineLimit(1)
                 Spacer(minLength: 8)
                 Badge(text: "\(pods.count - missing.count)/\(pods.count) pods", color: missing.isEmpty ? Theme.ok : Theme.warn)
             }
@@ -111,7 +114,13 @@ struct TelemetryView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(pod.metadata.name).font(Theme.mono(12)).foregroundStyle(Theme.fg)
                             .lineLimit(1).truncationMode(.middle)
-                        Text(describe(installation)).font(Theme.mono(10.5)).foregroundStyle(Theme.faint)
+                        // The image it is running, not the one this app pins:
+                        // on a cluster built with tmmscope they are different
+                        // repositories entirely.
+                        Text(Exporter.runningImage(in: pod) ?? describe(installation))
+                            .font(Theme.mono(10.5)).foregroundStyle(Theme.faint)
+                            .lineLimit(1).truncationMode(.middle)
+                        Text(describe(installation)).font(Theme.mono(10)).foregroundStyle(Theme.faint.opacity(0.8))
                     }
                     Spacer(minLength: 8)
                     switch installation {
@@ -151,16 +160,16 @@ struct TelemetryView: View {
 
     private var installBlurb: String {
         missing.isEmpty
-            ? "Every f5-tmm pod already carries the exporter."
-            : "Attaches the exporter to \(missing.count) pod\(missing.count == 1 ? "" : "s") as an ephemeral container. TMM keeps running — nothing restarts. It reads the tmstat segment read-only and serves /metrics, which Field reads back through the apiserver; it pushes nowhere."
+            ? "Every f5-tmm pod already carries the exporter, so there is nothing to add. What is running there was not installed by this app — the images above say what each pod actually has."
+            : "Attaches \(Exporter.image) to \(missing.count) pod\(missing.count == 1 ? "" : "s") as an ephemeral container. TMM keeps running — nothing restarts. It reads the tmstat segment read-only and serves /metrics, which Field reads back through the apiserver; it pushes nowhere."
     }
 
     private var actions: some View {
         HStack(alignment: .top, spacing: 16) {
-            card(title: "Install", body: installBlurb,
+            card(title: "Install", body: installBlurb, footer: "Nothing to do",
                  action: missing.isEmpty ? nil
                      : Action(label: "Add the exporter") { Task { await install() } })
-            card(title: "Remove", body: removeExplanation,
+            card(title: "Remove", body: removeExplanation, footer: removeFooter,
                  action: ephemeral.isEmpty ? nil
                      : Action(label: "Remove…", destructive: true) { typed = ""; confirmingRemoval = true })
         }
@@ -173,11 +182,22 @@ struct TelemetryView: View {
         if permanentCount > 0 {
             return "The exporter here is part of the pod template, so this app cannot remove it: deleting the pods would drop traffic and the exporter would come straight back with the replacements. It has to be removed where it is defined."
         }
-        return "Nothing to remove."
+        return "There is no exporter on any of these pods."
+    }
+
+    /// What the Remove card says where there is no button.
+    ///
+    /// "Nothing to do" was wrong and confusing on the case that matters: there
+    /// IS an exporter, it simply cannot be removed from here. The card explained
+    /// that in its body and then contradicted itself underneath.
+    private var removeFooter: String {
+        guard permanentCount > 0 else { return "Nothing to do" }
+        guard !owners.isEmpty else { return "Remove it in the workload that defines it" }
+        return "Defined in \(owners.joined(separator: ", "))"
     }
 
     @ViewBuilder
-    private func card(title: String, body text: String, action: Action?) -> some View {
+    private func card(title: String, body text: String, footer: String, action: Action?) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.fg)
             Text(text).font(.system(size: 12.5)).foregroundStyle(Theme.muted)
@@ -189,7 +209,8 @@ struct TelemetryView: View {
                     .tint(action.destructive ? Theme.bad : Theme.primary)
                     .disabled(busy)
             } else {
-                Text("Nothing to do").font(.system(size: 12)).foregroundStyle(Theme.faint)
+                Text(footer).font(.system(size: 12)).foregroundStyle(Theme.faint)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(16)
@@ -212,6 +233,22 @@ struct TelemetryView: View {
     }
 
     // MARK: - Wiring
+
+    /// Who defines a permanent exporter. Asked once per screen load rather than
+    /// only at the moment removal is refused, because the answer is the useful
+    /// part of the refusal.
+    private func findOwners() async {
+        owners = []
+        guard let cluster = store.current, let client = try? cluster.client() else { return }
+        var found: Set<String> = []
+        for pod in pods where Exporter.installation(in: pod) != .absent {
+            if case .permanent = Exporter.installation(in: pod),
+               let owner = await Exporter.owner(of: pod, using: client) {
+                found.insert(owner)
+            }
+        }
+        owners = found.sorted()
+    }
 
     private func install() async {
         guard let cluster = store.current, let client = try? cluster.client() else { return }

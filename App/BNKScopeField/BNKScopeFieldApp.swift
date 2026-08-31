@@ -9,6 +9,7 @@ struct BNKScopeFieldApp: App {
     @State private var nico = NICoEngine()
     @State private var overview = OverviewEngine()
     @State private var dpu = DPUEngine()
+    @State private var resources = ResourceEngine()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -21,6 +22,7 @@ struct BNKScopeFieldApp: App {
                 .environment(nico)
                 .environment(overview)
                 .environment(dpu)
+                .environment(resources)
                 .preferredColorScheme(.dark)
                 .tint(Theme.primary)
                 .task { store.load(); await store.probeAll() }

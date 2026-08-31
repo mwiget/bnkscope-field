@@ -315,6 +315,25 @@ last two are the same `pf0hpf` and `pf1hpf` the dataplane chart on TMM Live
 counts. Read-only: changing how traffic is steered is not something to do from a
 tablet by accident.
 
+### Resources
+
+Browse any of eight kinds, filter by namespace, search, and open one to read its
+events and its YAML. Deliberately untyped, unlike the rest of `K8s`: the typed
+models exist because particular screens render particular fields, and a browser
+renders whatever is there.
+
+**Secrets are not offered.** Everything else here is safe on a screen; a Secret's
+whole content is its value, and a generic YAML view of one puts cluster
+credentials on a tablet in whatever room you happen to be in. The app reads the
+two secrets it genuinely needs, by name, for certificate dates.
+
+`managedFields` is stripped from the YAML — server bookkeeping, routinely longer
+than the object, and nobody has wanted to read it on a tablet. And
+`JSONSerialization`'s output has to be converted to Swift's own types before Yams
+will dump it: `NSNull` and `NSNumber` are not things it can represent, and a JSON
+`true` is an `NSNumber` that dumps as `1` unless you check for `CFBoolean`, which
+would change what the document says.
+
 ### Known gaps
 
 - Direct mode only. The in-cluster collector, logs and the pod terminal are not

@@ -262,6 +262,27 @@ case "dpu":
         print("  \(pad(i.spec.interfaceType ?? "?", 9)) \(pad(i.interfaceName, 16)) \(i.detail ?? "")")
     }
 
+case "get":
+    guard args.count >= 3 else { die("usage: bnkfield get <kubeconfig> <ctx> <kind> [namespace]") }
+    let client = try KubeClient(context: try loadContext(args[0], args[1]))
+    guard let kind = ResourceKind.all.first(where: { $0.plural == args[2] || $0.name.lowercased() == args[2] }) else {
+        die("unknown kind — have: " + ResourceKind.all.map(\.plural).joined(separator: ", "))
+    }
+    let objects = try await client.list(kind, namespace: args.count > 3 ? args[3] : nil)
+    print("\(objects.count) \(kind.name)")
+    for o in objects.prefix(4) {
+        print("  \(pad(o.namespace ?? "-", 22)) \(o.name)")
+    }
+    if let first = objects.first {
+        print("--- yaml of \(first.name), first 14 lines ---")
+        for line in first.yaml.split(separator: "\n").prefix(14) { print("  \(line)") }
+        if let ns = first.namespace {
+            let events = try await client.events(about: first.name, namespace: ns)
+            print("--- \(events.count) events about it ---")
+            for e in events.prefix(2) { print("  \(e.type ?? "?") \(e.reason ?? "") — \((e.message ?? "").prefix(70))") }
+        }
+    }
+
 default:
     print(usage); exit(2)
 }

@@ -4,6 +4,7 @@ enum Section: String, CaseIterable, Identifiable {
     case overview = "Overview"
     case tmmLive  = "TMM Live"
     case clusters = "Clusters"
+    case resources = "Resources"
     case logs = "Logs"
     case dpu = "DPU Services"
     case nico = "NICo"
@@ -17,6 +18,7 @@ enum Section: String, CaseIterable, Identifiable {
         case .overview: return "square.grid.2x2"
         case .tmmLive:  return "waveform.path.ecg"
         case .clusters: return "square.stack.3d.up"
+        case .resources: return "list.bullet.rectangle"
         case .logs: return "text.alignleft"
         case .dpu: return "point.3.connected.trianglepath.dotted"
         case .nico: return "network"
@@ -74,6 +76,7 @@ struct RootView: View {
                 case .telemetry:           TelemetryView(columns: $columns)
                 case .overview:            OverviewView(columns: $columns)
                 case .clusters:            ClustersView(columns: $columns)
+                case .resources:           ResourcesView(columns: $columns)
                 }
             }
             .background(Theme.bg)

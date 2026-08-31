@@ -205,6 +205,26 @@ a Redis retry storm all as `info`, because F5's CWC logger spells the level
 taken off the cluster rather than invented, including the reassuring cases a
 substring search turns into alarms (`0 errors`, `/var/log/failed/`).
 
+### Terminal
+
+Runs a command in a container over `pods/exec` and streams what it prints.
+Stdout and stderr are separated, and the exit code arrives on the status channel
+— the only place it appears, since the WebSocket closes cleanly either way.
+
+**No TTY, deliberately.** A TTY means a terminal emulator: cursor addressing,
+scroll regions, the alternate screen. What this is for is `tmctl`, `configview`
+and `bdt_cli` — commands that print and exit — and a shell that cannot run `vi`
+would be worse than no shell. There is no shell interpretation either: the
+command is split on whitespace and handed to exec, so no quotes and no pipes.
+
+The quick commands were checked against a live tmm pod, which changed two of
+them. The first set returned "No such column". The rest had to be trimmed to fit
+80 characters, because `tmctl` stacks its table into blocks beyond that and with
+no TTY there is nothing to tell it otherwise — it has no width flag and ignores
+`COLUMNS`. Pool members are absent for that reason: `pool_name` pads to 63
+characters on this cluster so nothing fits beside it, and those numbers are
+already a chart on TMM Live.
+
 ### Known gaps
 
 - No app icon yet.

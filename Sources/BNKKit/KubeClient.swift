@@ -125,9 +125,18 @@ public final class KubeClient: NSObject, Sendable {
     /// A WebSocket onto a pod subresource. `v5.channel.k8s.io` for exec,
     /// `v4.channel.k8s.io` for port-forward — both answer 101 on 1.30+.
     public func webSocket(_ path: String, query: [String: String], protocols: [String]) throws -> URLSessionWebSocketTask {
+        try webSocket(path,
+                      items: query.map { URLQueryItem(name: $0.key, value: $0.value) }.sorted { $0.name < $1.name },
+                      protocols: protocols)
+    }
+
+    /// Takes query *items* rather than a dictionary, because `exec` repeats
+    /// `command` once per argument — `?command=/bin/sh&command=-c&command=…` —
+    /// and a dictionary cannot say that.
+    public func webSocket(_ path: String, items: [URLQueryItem], protocols: [String]) throws -> URLSessionWebSocketTask {
         var comps = URLComponents(url: context.server.appending(path: path), resolvingAgainstBaseURL: false)!
         comps.scheme = context.server.scheme == "https" ? "wss" : "ws"
-        comps.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }.sorted { $0.name < $1.name }
+        comps.queryItems = items
         var r = URLRequest(url: comps.url!)
         if case .bearerToken(let t) = context.auth { r.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
         if case .unsupported(let why) = context.auth { throw Failure.unusable(why) }

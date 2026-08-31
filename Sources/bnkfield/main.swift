@@ -169,6 +169,20 @@ case "logs":
         group.cancelAll()
     }
 
+case "exec":
+    guard args.count >= 5 else { die("usage: bnkfield exec <kubeconfig> <ctx> <ns> <pod> <container> <cmd...>") }
+    let client = try KubeClient(context: try loadContext(args[0], args[1]))
+    let command = Array(args.dropFirst(5))
+    do {
+        for try await chunk in client.exec(namespace: args[2], pod: args[3],
+                                           container: args[4], command: command) {
+            FileHandle(fileDescriptor: chunk.source == .stderr ? 2 : 1).write(Data(chunk.text.utf8))
+        }
+        print("\n[exit ok]")
+    } catch {
+        print("\n[failed] \(error)")
+    }
+
 default:
     print(usage); exit(2)
 }

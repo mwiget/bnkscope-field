@@ -5,6 +5,7 @@ struct BNKScopeFieldApp: App {
     @State private var store = ClusterStore()
     @State private var engine = TelemetryEngine()
     @State private var logs = LogsEngine()
+    @State private var exec = ExecEngine()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -13,6 +14,7 @@ struct BNKScopeFieldApp: App {
                 .environment(store)
                 .environment(engine)
                 .environment(logs)
+                .environment(exec)
                 .preferredColorScheme(.dark)
                 .tint(Theme.primary)
                 .task { store.load(); await store.probeAll() }
@@ -23,7 +25,7 @@ struct BNKScopeFieldApp: App {
             // for a session nobody is watching.
             switch phase {
             case .active:                 engine.resume()
-            case .inactive, .background:  engine.pause(); logs.stop()
+            case .inactive, .background:  engine.pause(); logs.stop(); exec.cancel()
             @unknown default:             engine.pause()
             }
         }

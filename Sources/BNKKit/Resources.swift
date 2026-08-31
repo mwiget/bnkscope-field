@@ -118,7 +118,11 @@ public struct ResourceKind: Identifiable, Hashable, Sendable {
     /// screen; a Secret's whole content is its value, and a generic YAML view of
     /// one would put cluster credentials on a tablet in a coffee shop. The app
     /// reads the two secrets it genuinely needs by name, for certificate dates.
+    /// Nodes lead deliberately. The first entry is what the screen opens on, and
+    /// a cluster's nodes are a page you can take in at a glance, where its pods
+    /// are hundreds of rows nobody asked for yet.
     public static let all: [ResourceKind] = [
+        ResourceKind(name: "Nodes", plural: "nodes", root: "api/v1", namespaced: false),
         ResourceKind(name: "Pods", plural: "pods", root: "api/v1", namespaced: true),
         ResourceKind(name: "Deployments", plural: "deployments", root: "apis/apps/v1", namespaced: true),
         ResourceKind(name: "DaemonSets", plural: "daemonsets", root: "apis/apps/v1", namespaced: true),
@@ -126,7 +130,6 @@ public struct ResourceKind: Identifiable, Hashable, Sendable {
         ResourceKind(name: "Services", plural: "services", root: "api/v1", namespaced: true),
         ResourceKind(name: "ConfigMaps", plural: "configmaps", root: "api/v1", namespaced: true),
         ResourceKind(name: "Events", plural: "events", root: "api/v1", namespaced: true),
-        ResourceKind(name: "Nodes", plural: "nodes", root: "api/v1", namespaced: false),
     ]
 }
 

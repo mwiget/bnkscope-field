@@ -157,7 +157,7 @@ struct ExporterPanel: View {
         }
         busy = true
         let outcome = await Exporter.install(into: missing, clusterLabel: cluster.displayName, using: client)
-        await cluster.probe()
+        await cluster.probeReflectingChange()
         busy = false
         report = Report(title: outcome.failed.isEmpty ? "Exporter added" : "Exporter partly added",
                         lines: summarise(outcome, verb: "added to"), bad: !outcome.failed.isEmpty)
@@ -177,7 +177,7 @@ struct ExporterPanel: View {
         typed = ""
         engine.stop()
         let outcome = await Exporter.remove(from: ephemeral, using: client)
-        await cluster.probe()
+        await cluster.probeReflectingChange()
         busy = false
         report = Report(title: outcome.failed.isEmpty ? "Pods recreated" : "Removal incomplete",
                         lines: summarise(outcome, verb: "recreated"), bad: !outcome.failed.isEmpty)

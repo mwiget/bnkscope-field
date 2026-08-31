@@ -70,6 +70,15 @@ final class TelemetryEngine {
     /// 30 minutes at 2s.
     static let historyLimit = 900
 
+    /// How many scrapes in a row must fail before that is called a failure.
+    ///
+    /// A freshly injected exporter is not serving the moment the API call
+    /// returns — the container still has to be created and started. Reporting
+    /// the first refused connection as a fault put a full-screen error in front
+    /// of the reader for the second or two before it worked, which reads as
+    /// something having gone wrong when nothing has.
+    static let failuresBeforeGivingUp = 4
+
     enum PodStatus: Equatable {
         case answering(samples: Int)
         case failing(String)
@@ -94,6 +103,7 @@ final class TelemetryEngine {
     /// How often a tunnel had to be rebuilt. Zero is the expected value; a
     /// number that climbs means something keeps dropping them.
     private(set) var reconnects: Int = 0
+    private var failureStreak = 0
     private(set) var targets: [String] = []
     /// What each pod did on the last scrape: how many samples it returned, or
     /// why it did not answer. This is the fact the target list should show —
@@ -129,6 +139,7 @@ final class TelemetryEngine {
             return
         }
         state = .live
+        failureStreak = 0
         scrapers = Dictionary(uniqueKeysWithValues: pods.map {
             ($0, PodScraper(client: client, namespace: namespace, pod: $0))
         })
@@ -225,9 +236,13 @@ final class TelemetryEngine {
         }
 
         guard !frames.isEmpty else {
-            state = .failed(failures.first ?? "every scrape failed")
+            failureStreak += 1
+            if failureStreak >= Self.failuresBeforeGivingUp {
+                state = .failed(failures.first ?? "every scrape failed")
+            }
             return
         }
+        failureStreak = 0
         if state != .live { state = .live }
         let now = Date()
         if let previousScrape = lastScrape {

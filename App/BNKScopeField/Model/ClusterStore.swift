@@ -61,6 +61,7 @@ final class ManagedCluster: Identifiable {
 
     private var cached: KubeClient?
     private var probeInFlight: Task<Void, Never>?
+    private var probeSerial = 0
 
     init(context: Kubeconfig.Context, sourceFile: String) {
         self.context = context
@@ -96,10 +97,31 @@ final class ManagedCluster: Identifiable {
             await probeInFlight.value
             return
         }
+        await runProbe()
+    }
+
+    /// Probe for a caller that has just changed the cluster.
+    ///
+    /// Joining an in-flight probe is wrong here. That probe listed the pods
+    /// before the change landed, so adopting its answer shows the cluster as it
+    /// was a moment ago: an exporter this app just installed reads as still
+    /// missing, the overview keeps warning about it, and nothing starts
+    /// scraping the pod it was added to.
+    func probeReflectingChange() async {
+        if let probeInFlight { await probeInFlight.value }
+        await runProbe()
+    }
+
+    private func runProbe() async {
+        probeSerial += 1
+        let mine = probeSerial
         let task = Task { await performProbe() }
         probeInFlight = task
         await task.value
-        probeInFlight = nil
+        // Only retire the handle if it is still ours — a caller that waited on
+        // us has since installed its own, and clearing that one would let a
+        // third caller start a duplicate probe.
+        if probeSerial == mine { probeInFlight = nil }
     }
 
     private func performProbe() async {

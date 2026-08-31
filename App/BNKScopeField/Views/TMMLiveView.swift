@@ -139,6 +139,9 @@ struct TMMLiveView: View {
                     detail: "TMM Live needs a cluster running BNK. This one has nothing to scrape.")
         case .idle:
             ExporterPanel(style: .prompt)
+        case .live where engine.lastScrape == nil:
+            Message(title: "Waiting for the first samples",
+                    detail: "The exporter has just been added. It takes a scrape or two to start serving.")
         case _ where zoomed != nil:
             zoomedPanel
         default:

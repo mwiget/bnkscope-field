@@ -81,6 +81,10 @@ final class TelemetryEngine {
     private(set) var panels: [PanelID: PanelData] = [:]
     private(set) var lastScrape: Date?
     private(set) var lastDuration: TimeInterval = 0
+    /// The interval actually being achieved, which is not `liveInterval` when a
+    /// scrape takes longer than it. On a real device over wifi it is several
+    /// times longer, because every scrape currently opens its own tunnel.
+    private(set) var achievedInterval: TimeInterval = 0
     private(set) var bytesPerScrape: Int = 0
     private(set) var targets: [String] = []
 
@@ -137,6 +141,7 @@ final class TelemetryEngine {
         // spike. Dropping the previous frame makes the first scrape back a
         // baseline instead.
         previous.removeAll()
+        lastScrape = nil
         task = Task { [weak self] in await self?.loop() }
         _ = client
     }
@@ -147,6 +152,8 @@ final class TelemetryEngine {
         state = .idle
         panels.removeAll()
         previous.removeAll()
+        lastScrape = nil
+        achievedInterval = 0
     }
 
     // MARK: - The loop
@@ -193,6 +200,11 @@ final class TelemetryEngine {
         }
         if state != .live { state = .live }
         let now = Date()
+        if let previousScrape = lastScrape {
+            let gap = now.timeIntervalSince(previousScrape)
+            // Smoothed, so one slow scrape does not make the readout jump.
+            achievedInterval = achievedInterval == 0 ? gap : achievedInterval * 0.7 + gap * 0.3
+        }
         lastScrape = now
         ingest(frames, at: now)
     }

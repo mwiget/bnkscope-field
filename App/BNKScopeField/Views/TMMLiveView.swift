@@ -41,7 +41,11 @@ struct TMMLiveView: View {
         Group {
             switch engine.state {
             case .live:
-                Pill(text: "LIVE", detail: "2s", tone: .live)
+                // The measured cadence, not the target. A pill that says 2s
+                // while the loop is turning every five seconds is the kind of
+                // small lie that makes you distrust the chart next to it.
+                Pill(text: "LIVE", detail: engine.achievedInterval > 0
+                     ? String(format: "%.1fs", engine.achievedInterval) : "…", tone: .live)
             case .paused:
                 Pill(text: "PAUSED", systemImage: "moon.fill", tone: .neutral)
             case .idle:
@@ -96,7 +100,7 @@ struct TMMLiveView: View {
                  unit: "", sub: "software path · 10 s mean")
             Tile(label: "SCRAPE",
                  value: String(format: "%.2f", engine.lastDuration), unit: "s",
-                 sub: "\(engine.bytesPerScrape) samples")
+                 sub: "\(engine.bytesPerScrape) samples · new tunnel each time")
         }
     }
 

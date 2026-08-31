@@ -96,11 +96,24 @@ than merely quiet:
 - The previous frame is dropped on resume, so the first rate after a sleep is a
   baseline rather than a counter differenced over ten minutes.
 
+### On a real device
+
+Measured against `dpu-cplane-tenant1` by differencing the apiserver's
+`apiserver_request_total{subresource="portforward"}` with the app stopped and
+running: 43 requests in 120 s at rest, 87 with the app up, so 44 are the iPad's.
+That is two pods every ~5.5 s, not the 2 s the loop asks for.
+
+The simulator manages ~1.2 s per scrape because it shares the Mac's network
+stack; a real iPad over wifi does not. The cost is tunnel setup, paid fresh on
+every scrape, and it is the single thing most worth fixing. Until it is, the LIVE
+pill shows the cadence actually being achieved rather than the one requested — a
+pill reading 2s over a chart being drawn every 5 s is the kind of small lie that
+makes the chart beside it untrustworthy.
+
 ### Known gaps
 
-- A fresh port-forward per scrape. It works — ~1.2 s for two pods against a 2 s
-  interval — but half the budget goes on tunnel setup that a kept-open connection
-  would not pay.
+- A fresh port-forward per scrape, which is where the 5.5 s goes. A tunnel held
+  open across scrapes is the fix.
 - No app icon yet.
 - Direct mode only. The in-cluster collector, logs and the pod terminal are not
   built.

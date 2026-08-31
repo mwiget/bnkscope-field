@@ -120,8 +120,15 @@ and a 120-second run at a 2 s interval: 55 scrapes, 0 failures, **0 reconnects**
 the tunnel survives, which is the thing worth knowing.
 
 For the device the honest instrument is the app itself: the LIVE pill shows the
-cadence actually being achieved, so read it off the screen rather than inferring
-it from the cluster.
+cadence actually being achieved. On an iPad Pro M4 against `dpu-cplane-tenant1`
+it reads **2.1 s** — the 2 s interval plus a ~0.1 s scrape, matching the held
+tunnel above. The loop is doing what it asks for.
+
+Which is also the epitaph for the retracted number: at 0.188 s per fresh-tunnel
+scrape the cycle would have been ~2.2 s before this change. Keeping the tunnel
+halves the work per scrape and turns one apiserver upgrade per scrape into one
+per session, both worth having — but it was never rescuing the app from 5.5 s,
+because the app was never at 5.5 s.
 
 ### Window sizes
 
@@ -139,8 +146,6 @@ narrow window has no way back to the cluster list.
 
 ### Known gaps
 
-- The cadence on a real device is unmeasured. The LIVE pill reports it; nobody
-  has written down what it says.
 - No app icon yet.
 - Direct mode only. The in-cluster collector, logs and the pod terminal are not
   built.

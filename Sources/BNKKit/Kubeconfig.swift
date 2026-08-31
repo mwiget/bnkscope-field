@@ -96,6 +96,43 @@ public struct Kubeconfig: Sendable {
         contexts.first { $0.name == name }
     }
 
+    /// One self-contained kubeconfig per context.
+    ///
+    /// A file with three contexts in it is three clusters, and after import it
+    /// should be three independent things — removing one has no business
+    /// touching the others. Splitting on the way in makes that true by
+    /// construction, rather than by remembering which contexts were removed and
+    /// filtering them out on every load.
+    public static func split(yaml: String) throws -> [(name: String, yaml: String)] {
+        guard let root = try Yams.load(yaml: yaml) as? [String: Any] else {
+            throw ParseError.notAMapping
+        }
+        let clusters = byName(root["clusters"], key: "cluster")
+        let users = byName(root["users"], key: "user")
+        var out: [(String, String)] = []
+
+        for entry in root["contexts"] as? [[String: Any]] ?? [] {
+            guard let name = entry["name"] as? String,
+                  let ctx = entry["context"] as? [String: Any],
+                  let clusterName = ctx["cluster"] as? String,
+                  let cluster = clusters[clusterName] else { continue }
+            let userName = ctx["user"] as? String
+            var document: [String: Any] = [
+                "apiVersion": "v1",
+                "kind": "Config",
+                "clusters": [["name": clusterName, "cluster": cluster]],
+                "contexts": [["name": name, "context": ctx]],
+                "current-context": name,
+            ]
+            if let userName, let user = users[userName] {
+                document["users"] = [["name": userName, "user": user]]
+            }
+            guard let text = try? Yams.dump(object: document) else { continue }
+            out.append((name, text))
+        }
+        return out
+    }
+
     // MARK: - Auth
 
     static func auth(from user: [String: Any]) -> Auth {

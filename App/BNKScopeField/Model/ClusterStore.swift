@@ -177,9 +177,13 @@ final class ClusterStore {
         files.removeAll()
         let urls = (try? FileManager.default.contentsOfDirectory(at: Self.directory,
                                                                  includingPropertiesForKeys: nil)) ?? []
-        for url in urls.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
-            adopt(url)
+        var files = urls.sorted { $0.lastPathComponent < $1.lastPathComponent }
+        if files.contains(where: { migrateMultiContext($0) }) {
+            files = ((try? FileManager.default.contentsOfDirectory(
+                at: Self.directory, includingPropertiesForKeys: nil)) ?? [])
+                .sorted { $0.lastPathComponent < $1.lastPathComponent }
         }
+        for url in files { adopt(url) }
         selectSomethingUseful()
     }
 
@@ -203,44 +207,44 @@ final class ClusterStore {
             // Parse before storing: a file that is not a kubeconfig should be
             // refused at the picker, not discovered on the next launch.
             _ = try Kubeconfig(yaml: String(decoding: data, as: UTF8.self))
-            let target = Self.directory.appending(path: name ?? source.lastPathComponent)
-            try data.write(to: target, options: [.atomic, .completeFileProtection])
-            adopt(target)
+            // Split on the way in: after import a cluster is its own thing, and
+            // which file it arrived in stops mattering.
+            for (name, text) in try Kubeconfig.split(yaml: String(decoding: data, as: UTF8.self)) {
+                let target = Self.directory.appending(path: Self.filename(for: name))
+                try text.write(to: target, atomically: true, encoding: .utf8)
+                try? FileManager.default.setAttributes(
+                    [.protectionKey: FileProtectionType.complete], ofItemAtPath: target.path)
+                adopt(target)
+            }
             selectSomethingUseful()
         } catch {
             importError = String(describing: error)
         }
     }
 
-    /// Forget a kubeconfig: its file, its keychain identities, its clusters.
+    /// Forget one cluster.
     ///
-    /// Removal is per FILE rather than per context, because a file is what was
-    /// imported and a file is what can be deleted. Dropping a single context
-    /// from a file with several would not survive a relaunch — `load` reads the
-    /// file back and adopts every context in it — so a per-context delete would
-    /// appear to work and then quietly undo itself.
-    ///
-    /// The earlier version of this took a cluster, forgot its identity, dropped
-    /// it from the list, and left the file on disk. It was never wired to
-    /// anything, which is the only reason nobody met it.
-    func removeKubeconfig(named file: String) {
-        for cluster in clusters where cluster.sourceFile == file {
-            if case .clientCertificate(let certPEM, _) = cluster.context.auth {
-                Identity.forget(tag: "bnkscope.field.\(cluster.context.name)", certPEM: certPEM)
-            }
+    /// Each cluster owns its own file, so this takes that file and nothing
+    /// else. Removal used to be per FILE, which on a kubeconfig holding three
+    /// contexts meant removing one dead cluster took the two working ones with
+    /// it.
+    func remove(_ cluster: ManagedCluster) {
+        if case .clientCertificate(let certPEM, _) = cluster.context.auth {
+            Identity.forget(tag: "bnkscope.field.\(cluster.context.name)", certPEM: certPEM)
         }
-        try? FileManager.default.removeItem(at: Self.directory.appending(path: file))
-        clusters.removeAll { $0.sourceFile == file }
-        files.removeAll { $0 == file }
+        try? FileManager.default.removeItem(at: Self.directory.appending(path: cluster.sourceFile))
+        clusters.removeAll { $0.id == cluster.id }
+        files.removeAll { $0 == cluster.sourceFile }
         if let selected, !clusters.contains(where: { $0.id == selected }) {
             self.selected = nil
             selectSomethingUseful()
         }
     }
 
-    /// Which contexts a file brought in, for saying so before it goes.
-    func contexts(from file: String) -> [String] {
-        clusters.filter { $0.sourceFile == file }.map(\.displayName)
+    /// The other clusters that came out of the same file. They stay.
+    func siblings(of cluster: ManagedCluster) -> [String] {
+        clusters.filter { $0.sourceFile == cluster.sourceFile && $0.id != cluster.id }
+            .map(\.displayName)
     }
 
     func probeAll() async {
@@ -257,6 +261,26 @@ final class ClusterStore {
 
     var current: ManagedCluster? {
         clusters.first { $0.id == selected }
+    }
+
+    /// A file name that is one cluster's, and safe on disk.
+    static func filename(for context: String) -> String {
+        let safe = context.map { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "." ? $0 : "-" }
+        return String(safe) + ".kubeconfig"
+    }
+
+    /// Anything imported before the split is still one file holding several
+    /// clusters. Splitting it on load means an old install behaves like a new
+    /// one rather than keeping the coupling for ever.
+    private func migrateMultiContext(_ url: URL) -> Bool {
+        guard let text = try? String(contentsOf: url, encoding: .utf8),
+              let parts = try? Kubeconfig.split(yaml: text), parts.count > 1 else { return false }
+        for (name, part) in parts {
+            let target = Self.directory.appending(path: Self.filename(for: name))
+            try? part.write(to: target, atomically: true, encoding: .utf8)
+        }
+        try? FileManager.default.removeItem(at: url)
+        return true
     }
 
     private func adopt(_ url: URL) {

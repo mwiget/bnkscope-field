@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import BNKKit
 
 struct OverviewView: View {
@@ -6,14 +7,21 @@ struct OverviewView: View {
     @Environment(ClusterStore.self) private var store
     @Environment(OverviewEngine.self) private var overview
     @Environment(Navigator.self) private var navigator
+    @State private var importing = false
 
     var body: some View {
         VStack(spacing: 0) {
             toolbar
             Divider().overlay(Theme.border)
             if store.clusters.isEmpty {
+                // The button is here rather than a sentence pointing at another
+                // screen. A screen that is empty should offer the thing that
+                // fills it, the same way TMM Live offers the exporter.
                 Message(title: "No clusters yet",
-                        detail: "Import a kubeconfig on the Clusters screen and this will tell you whether anything is wrong.")
+                        detail: "Import a kubeconfig and this will tell you whether anything is wrong. It reads every context in the file.") {
+                    Button("Import kubeconfig") { importing = true }
+                        .buttonStyle(.borderedProminent)
+                }
             } else {
                 ScrollView {
                     VStack(spacing: 14) {
@@ -39,6 +47,13 @@ struct OverviewView: View {
         .background(Theme.bg)
         .toolbar(.hidden, for: .navigationBar)
         .task(id: generation) { await overview.scan(store.clusters) }
+        .fileImporter(isPresented: $importing,
+                      allowedContentTypes: [.yaml, .text, .data],
+                      allowsMultipleSelection: true) { result in
+            guard case .success(let urls) = result else { return }
+            for url in urls { store.importKubeconfig(from: url) }
+            Task { await store.probeAll() }
+        }
     }
 
     /// Rescans when any cluster's probe answers, not only when the list changes.

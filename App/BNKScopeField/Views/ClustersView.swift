@@ -86,10 +86,8 @@ private struct ClusterCard: View {
     @Environment(ClusterStore.self) private var store
     @State private var confirmingRemoval = false
 
-    /// Other clusters that came out of the same file and would go with it.
-    private var siblings: [String] {
-        store.contexts(from: cluster.sourceFile).filter { $0 != cluster.displayName }
-    }
+    /// Other clusters from the same file. They are unaffected.
+    private var siblings: [String] { store.siblings(of: cluster) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 13) {
@@ -153,20 +151,20 @@ private struct ClusterCard: View {
         .overlay(RoundedRectangle(cornerRadius: 12)
             .strokeBorder(selected ? Theme.primary.opacity(0.4) : Theme.border))
         .contentShape(Rectangle())
-        .alert("Remove \(cluster.sourceFile)?", isPresented: $confirmingRemoval) {
+        .alert("Remove \(cluster.displayName)?", isPresented: $confirmingRemoval) {
             Button("Cancel", role: .cancel) { }
-            Button("Remove", role: .destructive) { store.removeKubeconfig(named: cluster.sourceFile) }
+            Button("Remove", role: .destructive) { store.remove(cluster) }
         } message: {
             Text(removalWarning)
         }
     }
 
-    /// A kubeconfig can hold several contexts, and removal is per file — so if
-    /// taking this one away takes others with it, say which before it happens.
     private var removalWarning: String {
-        let base = "Deletes the file and the certificates it put in the keychain. Nothing on the cluster is touched — import it again to come back."
-        guard !siblings.isEmpty else { return base }
-        return "This file also holds \(siblings.joined(separator: ", ")), which will go too.\n\n" + base
+        let base = "Nothing on the cluster is touched. Import \(cluster.sourceFile) again to bring it back."
+        guard !siblings.isEmpty else {
+            return "Removes this cluster and the certificate it put in the keychain, and deletes \(cluster.sourceFile) — it holds nothing else.\n\n" + base
+        }
+        return "Removes this cluster only. \(siblings.joined(separator: ", ")) came from the same file and stay.\n\n" + base
     }
 
     private var reachable: Bool { if case .reachable = cluster.reach { return true } else { return false } }

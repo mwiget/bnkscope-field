@@ -202,34 +202,73 @@ struct TMMLiveView: View {
                 Spacer()
             }
             ForEach(store.current?.tmmPods ?? [], id: \.metadata.name) { pod in
-                HStack(spacing: 12) {
-                    StatusDot(color: pod.has(container: "tmm-stat-exporter") ? Theme.ok : Theme.warn,
-                              glow: pod.has(container: "tmm-stat-exporter"))
-                    Text(pod.metadata.name)
-                        .font(Theme.mono(12)).foregroundStyle(Theme.fg)
-                        .lineLimit(1).truncationMode(.middle)
-                    Text(pod.node)
-                        .font(Theme.mono(11.5)).foregroundStyle(Theme.muted)
-                        .lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    switch pod.container(named: "tmm-stat-exporter") {
-                    case .durable:
-                        Badge(text: "in pod spec", color: Theme.ok)
-                    case .ephemeral:
-                        Badge(text: "ephemeral · goes on restart", color: Theme.warn)
-                    case nil:
-                        Badge(text: "no exporter", color: Theme.warn)
-                    }
-                }
-                .padding(.horizontal, 14).padding(.vertical, 10)
-                .background(Theme.bg, in: RoundedRectangle(cornerRadius: 9))
-                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.border))
+                targetRow(pod)
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border))
+    }
+
+    /// One exporter target.
+    ///
+    /// The dot answers "is this pod talking to me right now", which is the only
+    /// question the list is really being asked. How the exporter got into the
+    /// pod is a separate fact and is written as one — in the muted style, not in
+    /// a status colour, because being in the pod spec is not good news or bad
+    /// news, it is just how it was installed. Only the ephemeral case earns a
+    /// colour, because it is a caveat: it will not survive a TMM restart.
+    @ViewBuilder
+    private func targetRow(_ pod: K8s.Pod) -> some View {
+        let status = engine.podStatus[pod.metadata.name]
+        HStack(spacing: 12) {
+            StatusDot(color: dotColour(for: status, pod: pod),
+                      glow: { if case .answering = status { true } else { false } }())
+            VStack(alignment: .leading, spacing: 3) {
+                Text(pod.metadata.name)
+                    .font(Theme.mono(12)).foregroundStyle(Theme.fg)
+                    .lineLimit(1).truncationMode(.middle)
+                Text(detail(for: status, pod: pod))
+                    .font(Theme.mono(10.5))
+                    .foregroundStyle({ if case .failing = status { Theme.warn } else { Theme.faint } }())
+                    .lineLimit(1).truncationMode(.tail)
+            }
+            Spacer(minLength: 8)
+            Text(pod.node)
+                .font(Theme.mono(11.5)).foregroundStyle(Theme.muted)
+                .lineLimit(1).truncationMode(.middle)
+            if pod.container(named: "tmm-stat-exporter") == .ephemeral {
+                Badge(text: "ephemeral", color: Theme.warn)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(Theme.bg, in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.border))
+    }
+
+    private func dotColour(for status: TelemetryEngine.PodStatus?, pod: K8s.Pod) -> Color {
+        switch status {
+        case .answering:              return Theme.ok
+        case .failing:                return Theme.bad
+        case nil:                     return pod.has(container: "tmm-stat-exporter") ? Theme.muted : Theme.warn
+        }
+    }
+
+    private func detail(for status: TelemetryEngine.PodStatus?, pod: K8s.Pod) -> String {
+        switch status {
+        case .answering(let n):
+            let how = pod.container(named: "tmm-stat-exporter") == .ephemeral
+                ? "ephemeral container — goes when the pod is recreated"
+                : "exporter in the pod spec"
+            return "\(n) samples · \(how)"
+        case .failing(let why):
+            return why
+        case nil:
+            return pod.has(container: "tmm-stat-exporter")
+                ? "exporter present, not scraped yet"
+                : "no tmm-stat-exporter in this pod"
+        }
     }
 
     // MARK: - Wiring

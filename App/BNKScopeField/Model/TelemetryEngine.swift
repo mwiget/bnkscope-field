@@ -70,6 +70,11 @@ final class TelemetryEngine {
     /// 30 minutes at 2s.
     static let historyLimit = 900
 
+    enum PodStatus: Equatable {
+        case answering(samples: Int)
+        case failing(String)
+    }
+
     enum State: Equatable {
         case idle
         case live
@@ -90,6 +95,11 @@ final class TelemetryEngine {
     /// number that climbs means something keeps dropping them.
     private(set) var reconnects: Int = 0
     private(set) var targets: [String] = []
+    /// What each pod did on the last scrape: how many samples it returned, or
+    /// why it did not answer. This is the fact the target list should show —
+    /// whether an exporter is installed is a different question from whether it
+    /// is currently talking.
+    private(set) var podStatus: [String: PodStatus] = [:]
 
     private var client: KubeClient?
     private var namespace = ""
@@ -165,6 +175,7 @@ final class TelemetryEngine {
         state = .idle
         panels.removeAll()
         previous.removeAll()
+        podStatus.removeAll()
         lastScrape = nil
         achievedInterval = 0
         let leaving = scrapers.values
@@ -203,8 +214,12 @@ final class TelemetryEngine {
             }
             for await (pod, result) in group {
                 switch result {
-                case .success(let s): frames[pod] = s
-                case .failure(let e): failures.append("\(pod): \(e)")
+                case .success(let s):
+                    frames[pod] = s
+                    podStatus[pod] = .answering(samples: s.count)
+                case .failure(let e):
+                    failures.append("\(pod): \(e)")
+                    podStatus[pod] = .failing(Self.brief(e))
                 }
             }
         }
@@ -313,6 +328,12 @@ final class TelemetryEngine {
             out[String(tenant), default: []].append(s.seriesKey)
         }
         return out
+    }
+
+    /// One line, for a row in a list. The whole error belongs in a log.
+    static func brief(_ error: Error) -> String {
+        let text = String(describing: error)
+        return text.count > 80 ? String(text.prefix(80)) + "…" : text
     }
 
     /// `dpu-cplane-tenant1-tmm-g6lx4-f5-tmm-dhm72` → `dhm72`. The prefix is the

@@ -101,7 +101,10 @@ struct ChartPanel: View {
                 AxisGridLine().foregroundStyle(Theme.border.opacity(0.55))
                 AxisValueLabel {
                     if let t = value.as(Date.self) {
-                        Text(t, format: .dateTime.hour().minute().second())
+                        // Minutes and seconds only. The window is half an hour at
+                        // most, so the hour is the same on every label and only
+                        // costs the width that makes them collide.
+                        Text(t, format: .dateTime.minute().second())
                             .font(Theme.mono(9.5))
                             .foregroundStyle(Theme.faint)
                     }

@@ -115,12 +115,14 @@ private struct Sidebar: View {
                     .background(Theme.ember.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
                     .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Theme.ember.opacity(0.25)))
             }
-            // Centred, not leading. In a window rather than full screen, iPadOS
+            // Trailing, not leading. In a window rather than full screen, iPadOS
             // draws its close/minimise/resize controls over the top-left corner
-            // — over the mark and the wordmark — and does not inset the content
-            // to make room. The middle of the sidebar is the one place in this
-            // column those controls never reach.
-            .frame(maxWidth: .infinity, alignment: .center)
+            // and does not inset the content to make room. Centring was tried
+            // and is not enough: the row is about 180 pt wide in a 268 pt
+            // column, so the mark still lands under the controls. The trailing
+            // edge is the one position that clears them without depending on
+            // how wide they are or how wide the sidebar has been dragged.
+            .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 14)
 
             VStack(spacing: 2) {

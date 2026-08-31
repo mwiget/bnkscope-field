@@ -115,6 +115,12 @@ private struct Sidebar: View {
                     .background(Theme.ember.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
                     .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Theme.ember.opacity(0.25)))
             }
+            // Centred, not leading. In a window rather than full screen, iPadOS
+            // draws its close/minimise/resize controls over the top-left corner
+            // — over the mark and the wordmark — and does not inset the content
+            // to make room. The middle of the sidebar is the one place in this
+            // column those controls never reach.
+            .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 14)
 
             VStack(spacing: 2) {
@@ -267,6 +273,11 @@ struct SidebarToggle: View {
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
         }
         .buttonStyle(.plain)
+        // With the sidebar collapsed this button is the leftmost thing on the
+        // screen, which in a window is exactly where the system's own controls
+        // sit — and a button under them cannot be pressed, so the sidebar could
+        // not be reopened. Only the collapsed state needs the room.
+        .padding(.leading, columns == .detailOnly ? 72 : 0)
         .accessibilityLabel(columns == .detailOnly ? "Show clusters" : "Hide clusters")
     }
 }

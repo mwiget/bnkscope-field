@@ -199,3 +199,47 @@ import Testing
     #expect(line.text == "plain unprefixed output")
     #expect(line.at == nil)
 }
+
+// MARK: - Object naming
+
+@Suite("F5 object names")
+struct F5NameTests {
+    /// Real names, taken from a 2.3.2 cluster running the scenario suite and
+    /// from a DPU tenant cluster. The two conventions share no shape, which is
+    /// the whole reason the virtual-server panels stopped being tenant-only.
+    @Test("The listening address is dropped, the identity kept")
+    func trimsAddress() {
+        #expect(F5Names.shortObjectName("scn-cwatch-scn-cwatch-gateway-203.0.113.105-http-80-vs")
+                == "scn-cwatch-scn-cwatch-gateway")
+        #expect(F5Names.shortObjectName("scn-grpc-scn-grpc-l4-gateway-203.0.113.109-tcp-50052-vs")
+                == "scn-grpc-scn-grpc-l4-gateway")
+        #expect(F5Names.shortObjectName("scn-udp-lb-scn-udp-lb-gateway-203.0.113.107-udp-5005-vs")
+                == "scn-udp-lb-scn-udp-lb-gateway")
+    }
+
+    /// Two pools of one gateway must not collapse into one line — the rule name
+    /// after the port is the only thing telling them apart.
+    @Test("Pool rules survive the trim")
+    func keepsPoolRule() {
+        let a = F5Names.shortObjectName(
+            "scn-aitok-dssm-aitok-llm-rag-gw-203.0.113.123-http-8000-aitok-llm-rag-route-rule-0-pool")
+        let b = F5Names.shortObjectName(
+            "scn-aitok-dssm-aitok-llm-code-gw-203.0.113.121-http-8000-aitok-llm-code-route-rule-0-pool")
+        #expect(a == "scn-aitok-dssm-aitok-llm-rag-gw-aitok-llm-rag-route-rule-0")
+        #expect(a != b)
+    }
+
+    @Test("A name carrying no address is left alone")
+    func leavesPlainNames() {
+        #expect(F5Names.shortObjectName("tenant-acme-http-vs") == "tenant-acme-http")
+        #expect(F5Names.shortObjectName("snat_automap[0]") == "snat_automap[0]")
+    }
+
+    /// A four-part run of numbers is only an address if every octet fits.
+    @Test("Version-like runs are not addresses")
+    func rejectsNonAddresses() {
+        #expect(!F5Names.looksLikeIPv4("999.1.1.1"))
+        #expect(!F5Names.looksLikeIPv4("1.2.3"))
+        #expect(F5Names.looksLikeIPv4("203.0.113.105"))
+    }
+}

@@ -23,7 +23,10 @@ struct TMMLiveView: View {
         // changes what there is to scrape without changing which cluster is
         // selected, and the first version only watched the selection — so a
         // successful install left the screen sitting on its own install prompt.
-        .task(id: "\(store.selected ?? "")#\(store.current?.probeGeneration ?? 0)") { await follow() }
+        .task(id: store.selected ?? "") { await follow() }
+        .onChange(of: exporterPods) { _, pods in
+            if engine.isRunning { engine.retarget(to: pods) } else { Task { await follow() } }
+        }
     }
 
     // MARK: - Chrome
@@ -128,8 +131,18 @@ struct TMMLiveView: View {
     private var content: some View {
         switch engine.state {
         case .failed(let why):
-            Message(title: "The scrape stopped", detail: why, tone: Theme.bad) {
-                Button("Try again") { Task { await follow() } }.buttonStyle(.borderedProminent)
+            // The targets card comes too, because the usual reason every scrape
+            // stopped is that the exporter is gone — a restarted tmm pod comes
+            // back without its ephemeral container. A bare error with a "Try
+            // again" button offers the one action that cannot help.
+            ScrollView {
+                VStack(spacing: 16) {
+                    Message(title: "The scrape stopped", detail: why, tone: Theme.bad) {
+                        Button("Try again") { Task { await follow() } }.buttonStyle(.borderedProminent)
+                    }
+                    ExporterPanel(style: .card)
+                }
+                .padding(20)
             }
         case .idle where store.current == nil:
             Message(title: "No cluster selected",
@@ -245,10 +258,34 @@ struct TMMLiveView: View {
         // Nothing carrying the exporter is not a failure; it is the state the
         // install prompt exists for. Starting the engine here would report "no
         // f5-tmm pods" instead, which is both wrong and a dead end.
-        guard !pods.isEmpty,
-              let namespace = cluster.tmmPods.first?.metadata.namespace,
-              let client = try? cluster.client() else { return }
-        engine.start(client: client, namespace: namespace, pods: pods.map(\.metadata.name))
+        if !pods.isEmpty,
+           let namespace = cluster.tmmPods.first?.metadata.namespace,
+           let client = try? cluster.client() {
+            engine.start(client: client, namespace: namespace, pods: pods.map(\.metadata.name))
+        }
+        await keepRosterFresh(cluster)
+    }
+
+    /// Re-list the cluster's tmm pods while the screen is open.
+    ///
+    /// Nothing else notices when the cluster changes underneath: a scenario
+    /// restarts a tmm pod, the pod that comes back has no ephemeral container,
+    /// and the screen goes on scraping a pod that is gone while offering to
+    /// remove an exporter that already is. The re-list feeds `exporterPods`,
+    /// which retargets the engine and puts the Add button back.
+    private func keepRosterFresh(_ cluster: ManagedCluster) async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(20))
+            guard !Task.isCancelled else { return }
+            await cluster.probe()
+        }
+    }
+
+    private var exporterPods: [String] {
+        (store.current?.tmmPods ?? [])
+            .filter { $0.has(container: "tmm-stat-exporter") }
+            .map(\.metadata.name)
+            .sorted()
     }
 }
 

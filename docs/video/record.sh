@@ -95,7 +95,8 @@ case "${1:-all}" in
   1) take beat1 beat1Empty ;;
   2) take beat2a beat2ImportTap
      take beat2b beat2ImportResult tenant1.config ;;
-  3) take beat3 beat3Overview tenant1.config ;;
+  3) take beat3a beat3Overview tenant1.config
+     take beat3b beat3Finding tenant1.config ;;
   4) take beat4 beat4Logs tenant1.config ;;
   5) take beat5 beat5TMMLive tenant1.config ;;
   # The install take ends on its confirmation sheet, which covers the thing the

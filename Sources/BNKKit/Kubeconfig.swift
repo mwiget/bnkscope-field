@@ -15,6 +15,15 @@ public struct Kubeconfig: Sendable {
         public let clusterName: String
         public let server: URL
         public let caPEM: Data?
+        /// The name the server's certificate is checked against, when that is
+        /// not the address dialled.
+        ///
+        /// A cluster reached through a forward — a lab apiserver bound to
+        /// loopback, published on another address — presents a certificate for
+        /// the name it knows itself by, not the one you connected to. Ignoring
+        /// this field means such a cluster can only be used by turning
+        /// verification off altogether, which is a much bigger hammer.
+        public let tlsServerName: String?
         public let insecureSkipTLSVerify: Bool
         public let namespace: String?
         public let auth: Auth
@@ -71,6 +80,7 @@ public struct Kubeconfig: Sendable {
                 clusterName: clusterName,
                 server: server,
                 caPEM: Self.pemOrFile(cluster, dataKey: "certificate-authority-data", fileKey: "certificate-authority"),
+                tlsServerName: cluster["tls-server-name"] as? String,
                 insecureSkipTLSVerify: (cluster["insecure-skip-tls-verify"] as? Bool) ?? false,
                 namespace: ctx["namespace"] as? String,
                 auth: Self.auth(from: user)))

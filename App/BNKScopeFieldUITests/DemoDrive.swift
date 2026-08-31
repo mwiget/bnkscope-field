@@ -95,7 +95,10 @@ final class DemoDrive: XCTestCase {
             candidate.tap()
             break
         }
-        dwell(1.0)
+        // Rest on the empty Clusters screen. The next take is the same screen
+        // with a cluster in it, and the two are crossfaded — so this take has to
+        // end somewhere the other one can be dissolved into.
+        dwell(10.0)
     }
 
     /// The other half: a cluster that has just been imported and probed.
@@ -104,17 +107,28 @@ final class DemoDrive: XCTestCase {
         dwell(Beat.settle)
     }
 
+    /// Overview alone.
+    ///
+    /// Split from the tap because the narration spends twenty-odd seconds on
+    /// what Overview is before it mentions the pod — and in one take the sheet
+    /// opened as soon as the finding rendered, so the voice was still explaining
+    /// the ranking while the screen had moved on.
     func beat3Overview() throws {
         goTo("Overview")
-        dwell(Beat.read)
-        // The DSSM pods are the story: open the first finding that leads somewhere.
+        dwell(26.0)
+    }
+
+    /// Opening the pod, and what it says. The second half of scene03.
+    func beat3Finding() throws {
+        goTo("Overview")
+        dwell(2.0)
         let finding = app.buttons.containing(NSPredicate(format: "label CONTAINS 'f5-dssm'")).firstMatch
-        if finding.waitForExistence(timeout: 10) {
-            finding.tap()
-            dwell(Beat.hold3)
-            tap("Done")
-            dwell(Beat.read)
+        guard finding.waitForExistence(timeout: 20) else {
+            XCTFail("no f5-dssm finding on Overview")
+            return
         }
+        finding.tap()
+        dwell(14.0)
     }
 
     func beat4Logs() throws {

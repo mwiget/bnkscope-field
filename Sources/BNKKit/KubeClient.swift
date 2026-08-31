@@ -33,6 +33,7 @@ public final class KubeClient: NSObject, Sendable {
         }
         let anchors = try context.caPEM.map { try Identity.certificates(fromPEM: $0) } ?? []
         self.auth = Authenticator(identity: identity, anchors: anchors,
+                                  serverName: context.tlsServerName,
                                   insecure: context.insecureSkipTLSVerify)
         let cfg = URLSessionConfiguration.ephemeral
         cfg.httpAdditionalHeaders = ["User-Agent": "bnkscope-field/0.1"]
@@ -168,11 +169,13 @@ public final class KubeClient: NSObject, Sendable {
 private final class Authenticator: NSObject, URLSessionDelegate, URLSessionTaskDelegate, @unchecked Sendable {
     let identity: SecIdentity?
     let anchors: [SecCertificate]
+    let serverName: String?
     let insecure: Bool
 
-    init(identity: SecIdentity?, anchors: [SecCertificate], insecure: Bool) {
+    init(identity: SecIdentity?, anchors: [SecCertificate], serverName: String?, insecure: Bool) {
         self.identity = identity
         self.anchors = anchors
+        self.serverName = serverName
         self.insecure = insecure
     }
 
@@ -203,6 +206,12 @@ private final class Authenticator: NSObject, URLSessionDelegate, URLSessionTaskD
             }
             if insecure { return done(.useCredential, URLCredential(trust: trust)) }
             guard !anchors.isEmpty else { return done(.performDefaultHandling, nil) }
+            // Check the certificate against the name the kubeconfig says it will
+            // present, when that differs from the address dialled. Without this
+            // the only way to use a forwarded apiserver is to stop verifying.
+            if let serverName {
+                SecTrustSetPolicies(trust, SecPolicyCreateSSL(true, serverName as CFString))
+            }
             SecTrustSetAnchorCertificates(trust, anchors as CFArray)
             SecTrustSetAnchorCertificatesOnly(trust, true)
             var err: CFError?

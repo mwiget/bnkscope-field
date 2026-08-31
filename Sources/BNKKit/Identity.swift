@@ -128,13 +128,23 @@ public enum Identity {
         // SHA-1 of the certificate's public key; a key added without it forms no
         // identity, and the pairing lookup then finds nothing. Security computes
         // this itself for keys it generated — not for one handed to it as bytes.
-        var status = SecItemAdd(scoped([
+        // kSecAttrKeyType has to be stated. RSA happens to work without it —
+        // it is what the keychain assumes — and an EC key is rejected with
+        // "the specified item is no longer valid", which describes nothing. k3s
+        // issues EC client certificates, so this is not a corner: it is every
+        // k3s cluster.
+        var add: [CFString: Any] = [
             kSecClass: kSecClassKey,
             kSecAttrApplicationTag: tagData,
             kSecAttrApplicationLabel: keyHash,
             kSecAttrKeyClass: kSecAttrKeyClassPrivate,
             kSecValueRef: key,
-        ]), nil)
+        ]
+        if let attributes = SecKeyCopyAttributes(key) as? [CFString: Any],
+           let type = attributes[kSecAttrKeyType] {
+            add[kSecAttrKeyType] = type
+        }
+        var status = SecItemAdd(scoped(add), nil)
         guard status == errSecSuccess || status == errSecDuplicateItem else {
             throw Error.keychain("add key", status)
         }
@@ -189,10 +199,20 @@ public enum Identity {
         }
     }
 
-    /// SHA-1 of the DER public key — the value the keychain matches a
-    /// certificate against when it looks for the certificate's private key.
-    /// SHA-1 is not a security choice here; it is the format Security defines.
+    /// The value the keychain matches a certificate against when it looks for
+    /// that certificate's private key.
+    ///
+    /// Security computes this itself and exposes it as the key's application
+    /// label; that value is used when it is there. Computing one instead —
+    /// SHA-1 of the DER public key, which is the documented derivation — is
+    /// right for RSA and wrong for EC, where it disagrees with Security's and
+    /// the insert fails with "the specified item is no longer valid", a message
+    /// that describes nothing about the cause.
     static func publicKeyHash(of privateKey: SecKey) throws -> Data {
+        if let attributes = SecKeyCopyAttributes(privateKey) as? [CFString: Any],
+           let label = attributes[kSecAttrApplicationLabel] as? Data {
+            return label
+        }
         guard let pub = SecKeyCopyPublicKey(privateKey) else {
             throw Error.badPrivateKey("no public key could be derived")
         }

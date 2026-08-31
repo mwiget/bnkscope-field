@@ -38,6 +38,21 @@ hooking never sees it.
 
 ## Credentials
 
+`tls-server-name` is honoured. A cluster reached through a forward — a lab
+apiserver bound to loopback, republished on another address — presents a
+certificate for the name it knows itself by, not the one you dialled. Without
+this field the only way to use such a cluster is to turn verification off
+altogether, which is a far bigger hammer than the problem.
+
+**EC client certificates work on iOS and not from the macOS CLI harness.** k3s
+issues EC certs, and `SecItemAdd` refuses an EC key created from data into the
+macOS file keychain — every attribute combination returns "the specified item is
+no longer valid", which describes nothing. The data-protection keychain takes it
+happily, and that is the only keychain iOS has, so the app is fine and
+`bnkfield probe` is not. It is the one place the harness and the app genuinely
+diverge.
+
+
 Client certificates and bearer tokens. A kubeconfig that shells out to `aws`,
 `gcloud` or `kubelogin` is parsed and kept, but marked unusable with the name of
 the binary in the reason — iOS runs no binaries, and a context that quietly

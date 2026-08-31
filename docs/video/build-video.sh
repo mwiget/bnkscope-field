@@ -24,6 +24,11 @@ MANIFEST=(
   "scene09|beat9"
 )
 
+# How long one take dissolves into the next. Scenes shot as two takes are two
+# launches of the app, and a hard cut between them reads as the app restarting
+# mid-sentence — which is what it is, and not what the sentence is about.
+FADE=1.0
+
 dur() { ffprobe -v error -show_entries format=duration -of csv=p=0 "$1"; }
 
 # Where the app appears. The head of every take is the springboard while the
@@ -41,7 +46,12 @@ for row in "${MANIFEST[@]}"; do
     scene="${row%%|*}"; takes="${row##*|}"
     want=$(dur "$VO/$scene.wav")
     IFS=',' read -ra parts <<< "$takes"
-    share=$(python3 -c "print(f'{$want/${#parts[@]}:.2f}')")
+    # Two takes overlap by FADE, so together they must be that much longer.
+    if [ "${#parts[@]}" -gt 1 ]; then
+        share=$(python3 -c "print(f'{($want + $FADE)/${#parts[@]}:.2f}')")
+    else
+        share=$(python3 -c "print(f'{$want:.2f}')")
+    fi
     n=0
     for take in "${parts[@]}"; do
         start=$(python3 -c "print($(entry "$TAKES/$take.mp4") + 1.0)")
@@ -67,6 +77,16 @@ for row in "${MANIFEST[@]}"; do
             || echo "  !! ${scene}_$n is ${got}s, wanted ${share}s" >&2
         n=$((n+1))
     done
+    if [ "${#parts[@]}" -gt 1 ]; then
+        a="$OUT/seg/${scene}_0.mp4"; b="$OUT/seg/${scene}_1.mp4"
+        offset=$(python3 -c "print(f'{$(dur "$a") - $FADE:.3f}')")
+        ffmpeg -v error -i "$a" -i "$b" \
+            -filter_complex "[0][1]xfade=transition=fade:duration=$FADE:offset=$offset,fps=30" \
+            -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -an \
+            "$OUT/seg/${scene}_x.mp4" -y
+        rm -f "$a" "$b"
+        mv "$OUT/seg/${scene}_x.mp4" "$OUT/seg/${scene}_0.mp4"
+    fi
     printf "  %s  %ss over %s\n" "$scene" "$want" "$takes"
 done
 

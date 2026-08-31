@@ -106,14 +106,17 @@ public final class KubeClient: NSObject, Sendable {
     /// Kubernetes writes RFC 3339, usually to the second but with fractional
     /// seconds on some resources, and `.iso8601` rejects the fractional form.
     /// A timestamp that cannot be read should not fail the whole list.
+    /// Reuses the two formatters the log parser already holds, rather than
+    /// capturing fresh ones in the strategy closure — a `@Sendable` closure
+    /// capturing a non-Sendable `ISO8601DateFormatter`, which Xcode 27 is right
+    /// to complain about.
     static let decoder: JSONDecoder = {
         let d = JSONDecoder()
-        let plain = ISO8601DateFormatter()
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         d.dateDecodingStrategy = .custom { decoder in
             let s = try decoder.singleValueContainer().decode(String.self)
-            if let date = plain.date(from: s) ?? fractional.date(from: s) { return date }
+            if let date = KubeClient.rfc3339.date(from: s) ?? KubeClient.rfc3339Fractional.date(from: s) {
+                return date
+            }
             throw DecodingError.dataCorruptedError(in: try decoder.singleValueContainer(),
                                                    debugDescription: "not an RFC 3339 timestamp: \(s)")
         }

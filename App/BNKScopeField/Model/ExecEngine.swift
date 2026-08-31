@@ -35,8 +35,7 @@ final class ExecEngine {
         guard !command.isEmpty else { return }
         task?.cancel()
         running = true
-        var run = ExecRun(command: command.joined(separator: " "), container: container)
-        runs.append(run)
+        runs.append(ExecRun(command: command.joined(separator: " "), container: container))
         if runs.count > Self.historyLimit { runs.removeFirst(runs.count - Self.historyLimit) }
         let index = runs.count - 1
 
@@ -51,7 +50,6 @@ final class ExecEngine {
             } catch {
                 self?.finish(at: index, failure: TelemetryEngine.brief(error))
             }
-            _ = run
         }
     }
 

@@ -212,12 +212,35 @@ final class ClusterStore {
         }
     }
 
-    func remove(_ cluster: ManagedCluster) {
-        if case .clientCertificate(let certPEM, _) = cluster.context.auth {
-            Identity.forget(tag: "bnkscope.field.\(cluster.context.name)", certPEM: certPEM)
+    /// Forget a kubeconfig: its file, its keychain identities, its clusters.
+    ///
+    /// Removal is per FILE rather than per context, because a file is what was
+    /// imported and a file is what can be deleted. Dropping a single context
+    /// from a file with several would not survive a relaunch — `load` reads the
+    /// file back and adopts every context in it — so a per-context delete would
+    /// appear to work and then quietly undo itself.
+    ///
+    /// The earlier version of this took a cluster, forgot its identity, dropped
+    /// it from the list, and left the file on disk. It was never wired to
+    /// anything, which is the only reason nobody met it.
+    func removeKubeconfig(named file: String) {
+        for cluster in clusters where cluster.sourceFile == file {
+            if case .clientCertificate(let certPEM, _) = cluster.context.auth {
+                Identity.forget(tag: "bnkscope.field.\(cluster.context.name)", certPEM: certPEM)
+            }
         }
-        clusters.removeAll { $0.id == cluster.id }
-        if selected == cluster.id { selected = clusters.first(where: \.isUsable)?.id }
+        try? FileManager.default.removeItem(at: Self.directory.appending(path: file))
+        clusters.removeAll { $0.sourceFile == file }
+        files.removeAll { $0 == file }
+        if let selected, !clusters.contains(where: { $0.id == selected }) {
+            self.selected = nil
+            selectSomethingUseful()
+        }
+    }
+
+    /// Which contexts a file brought in, for saying so before it goes.
+    func contexts(from file: String) -> [String] {
+        clusters.filter { $0.sourceFile == file }.map(\.displayName)
     }
 
     func probeAll() async {

@@ -21,6 +21,9 @@ struct ClustersView: View {
                         ClusterCard(cluster: cluster, selected: store.selected == cluster.id)
                             .onTapGesture { if cluster.isUsable { store.selected = cluster.id } }
                     }
+                    if !store.files.isEmpty {
+                        KubeconfigList()
+                    }
                     if store.clusters.isEmpty {
                         Message(title: "No kubeconfigs yet",
                                 detail: "Import one from Files. Field needs a context with a client certificate or a bearer token — anything that shells out to aws, gcloud or kubelogin cannot be used on iOS.") {
@@ -221,5 +224,51 @@ struct Banner: View {
         .padding(14)
         .background(tone.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(tone.opacity(0.25)))
+    }
+}
+
+
+/// The kubeconfigs that were imported, and the way to take one back out.
+private struct KubeconfigList: View {
+    @Environment(ClusterStore.self) private var store
+    @State private var removing: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Kubeconfigs").font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Theme.fg)
+            ForEach(store.files, id: \.self) { file in
+                HStack(spacing: 12) {
+                    Image(systemName: "doc.text").font(.system(size: 14)).foregroundStyle(Theme.muted)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(file).font(Theme.mono(12)).foregroundStyle(Theme.fg)
+                        Text(contexts(file)).font(.system(size: 11)).foregroundStyle(Theme.faint)
+                    }
+                    Spacer(minLength: 8)
+                    Button("Remove") { removing = file }
+                        .buttonStyle(.bordered).controlSize(.small).tint(Theme.bad)
+                }
+                .padding(.horizontal, 13).padding(.vertical, 10)
+                .background(Theme.bg, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.border))
+            }
+        }
+        .padding(15)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border))
+        .alert("Remove \(removing ?? "")?", isPresented: .constant(removing != nil)) {
+            Button("Cancel", role: .cancel) { removing = nil }
+            Button("Remove", role: .destructive) {
+                if let file = removing { store.removeKubeconfig(named: file) }
+                removing = nil
+            }
+        } message: {
+            Text("Deletes the file and the certificates it put in the keychain. Nothing on the cluster is touched — import it again to come back.")
+        }
+    }
+
+    private func contexts(_ file: String) -> String {
+        let names = store.contexts(from: file)
+        return names.isEmpty ? "no usable contexts" : names.joined(separator: ", ")
     }
 }

@@ -292,6 +292,29 @@ A warning older than half an hour is history rather than a live fault, and a pod
 already reported as not-ready does not get a second row saying the same thing in
 different words.
 
+### DPU Services
+
+`svc.dpu.nvidia.com` — the API that steers traffic on the DPU. Interfaces are the
+ends, chains are the wiring between them, and it is how packets reach HBN and
+TMM.
+
+**This is not the DPF operator**, and the distinction cost a screen. The plan was
+a DPF tab like bnkscope's; there is no DPF operator on either reachable cluster —
+zero `dpu.nvidia.com` CRDs, and live bnkscope reports `not_installed` for the
+same cluster. What is there, and populated, is the service API: 2 ServiceChains,
+22 ServiceInterfaces, all ready.
+
+The role badge said `DPF` for the same reason and was wrong in the same way. It
+is detected from `svc.dpu.nvidia.com/` labels on the TMM pods, which means the
+workload is wired through the DPU service API — not that the DPF operator is
+installed. It says `DPU` now.
+
+Chains read as they are wired, per node: `p0 ↔ p0_if · hbn`, then
+`pf0hpf_if · hbn ↔ external · tmm` and `pf1hpf_if · hbn ↔ internal · tmm`. Those
+last two are the same `pf0hpf` and `pf1hpf` the dataplane chart on TMM Live
+counts. Read-only: changing how traffic is steered is not something to do from a
+tablet by accident.
+
 ### Known gaps
 
 - Direct mode only. The in-cluster collector, logs and the pod terminal are not

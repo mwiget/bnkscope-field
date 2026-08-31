@@ -244,6 +244,24 @@ case "install-dryrun":
         }
     }
 
+case "dpu":
+    guard args.count >= 2 else { die(usage) }
+    let client = try KubeClient(context: try loadContext(args[0], args[1]))
+    let chains = try await client.serviceChains()
+    let interfaces = try await client.serviceInterfaces()
+    print("service chains: \(chains.count)  (\(chains.filter(\.isReady).count) ready)")
+    for chain in chains {
+        print("  \(pad(chain.metadata.name, 22)) node \(chain.spec.node ?? "?")")
+        for (n, sw) in (chain.spec.switches ?? []).enumerated() {
+            let ends = (sw.ports ?? []).map { $0.serviceInterface?.described ?? "—" }
+            print("      switch \(n) mtu \(sw.serviceMTU.map(String.init) ?? "-"): \(ends.joined(separator: "  <->  "))")
+        }
+    }
+    print("service interfaces: \(interfaces.count)  (\(interfaces.filter(\.isReady).count) ready)")
+    for i in interfaces.prefix(6) {
+        print("  \(pad(i.spec.interfaceType ?? "?", 9)) \(pad(i.interfaceName, 16)) \(i.detail ?? "")")
+    }
+
 default:
     print(usage); exit(2)
 }

@@ -180,7 +180,7 @@ private struct ClusterCard: View {
     private func roleColor(_ role: ManagedCluster.Role) -> Color {
         switch role {
         case .bnk:  return Theme.series[0]
-        case .dpf:  return Theme.series[1]
+        case .dpu:  return Theme.series[1]
         case .nico: return Theme.series[2]
         }
     }

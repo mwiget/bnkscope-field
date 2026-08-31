@@ -188,14 +188,8 @@ public enum K8s {
             public let osImage: String?
             public let kubeletVersion: String?
         }
-        public struct Condition: Decodable, Sendable {
-            public let type: String
-            public let status: String
-        }
 
-        public var isReady: Bool {
-            (status?.conditions ?? []).contains { $0.type == "Ready" && $0.status == "True" }
-        }
+        public var isReady: Bool { K8s.isReady(status?.conditions) }
     }
 }
 

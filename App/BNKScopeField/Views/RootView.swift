@@ -5,6 +5,7 @@ enum Section: String, CaseIterable, Identifiable {
     case tmmLive  = "TMM Live"
     case clusters = "Clusters"
     case logs = "Logs"
+    case dpu = "DPU Services"
     case nico = "NICo"
     case terminal = "Terminal"
     case telemetry = "Telemetry"
@@ -17,6 +18,7 @@ enum Section: String, CaseIterable, Identifiable {
         case .tmmLive:  return "waveform.path.ecg"
         case .clusters: return "square.stack.3d.up"
         case .logs: return "text.alignleft"
+        case .dpu: return "point.3.connected.trianglepath.dotted"
         case .nico: return "network"
         case .terminal: return "apple.terminal"
         case .telemetry: return "square.3.layers.3d"
@@ -66,6 +68,7 @@ struct RootView: View {
                 switch section {
                 case .tmmLive:             TMMLiveView(columns: $columns)
                 case .logs:                LogsView(columns: $columns)
+                case .dpu:                 DPUView(columns: $columns)
                 case .nico:                NICoView(columns: $columns)
                 case .terminal:            TerminalView(columns: $columns)
                 case .telemetry:           TelemetryView(columns: $columns)
@@ -86,7 +89,13 @@ private struct Sidebar: View {
     /// NICo appears only on a cluster running it — the same shape as bnkscope's
     /// tab, and better than a screen that is permanently empty on most clusters.
     private var visibleSections: [Section] {
-        Section.allCases.filter { $0 != .nico || store.current?.roles.contains(.nico) == true }
+        Section.allCases.filter { section in
+            switch section {
+            case .nico: store.current?.roles.contains(.nico) == true
+            case .dpu:  store.current?.roles.contains(.dpu) == true
+            default:    true
+            }
+        }
     }
 
     var body: some View {

@@ -55,7 +55,7 @@ final class ManagedCluster: Identifiable {
     private(set) var probeGeneration = 0
 
     enum Role: String, CaseIterable, Comparable {
-        case bnk = "BNK", dpf = "DPF", nico = "NICo"
+        case bnk = "BNK", dpu = "DPU", nico = "NICo"
         static func < (a: Role, b: Role) -> Bool { a.rawValue < b.rawValue }
     }
 
@@ -116,9 +116,13 @@ final class ManagedCluster: Identifiable {
             let tmm = try await c.pods(labelSelector: "app=f5-tmm")
             if !tmm.isEmpty { found.insert(.bnk) }
             tmmPods = tmm
-            // Every DPF-managed workload carries a svc.dpu.nvidia.com/ label.
+            // A svc.dpu.nvidia.com/ label means the workload is wired through
+            // the DPU service API. It does NOT mean the DPF operator is here —
+            // that is a different API group, and on this lab it is installed on
+            // neither reachable cluster. The badge used to say DPF and was
+            // pointing at something true under the wrong name.
             if tmm.contains(where: { ($0.metadata.labels ?? [:]).keys.contains { $0.hasPrefix("svc.dpu.nvidia.com/") } }) {
-                found.insert(.dpf)
+                found.insert(.dpu)
             }
             if try await !c.pods(labelSelector: "app.kubernetes.io/name=nico-api").isEmpty {
                 found.insert(.nico)

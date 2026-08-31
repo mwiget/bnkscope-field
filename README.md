@@ -4,6 +4,45 @@ An iPad front end for [bnkscope](https://github.com/mwiget/bnkscope), talking to
 Kubernetes clusters directly from the device. No Docker, no server, no bnkscope
 instance to point at.
 
+## What it is
+
+Point it at a kubeconfig and it becomes a live view of a BNK cluster: TMM CPU,
+throughput and connections charted in real time, virtual-server and pool-member
+traffic, pod logs, a command runner, a resource browser, and an overview that
+sorts clusters by what is actually wrong. It is a troubleshooting tool for
+someone standing next to the rack with an iPad, not a replacement for the
+Grafana stack.
+
+## How it works on the iPad
+
+Import one or more kubeconfigs — a multi-context `~/.kube/config` is split into
+one cluster per context on import, so each can be removed on its own. Client
+certificates become keychain identities and bearer tokens are kept as they are;
+a context that shells out to `aws` or `kubelogin` is kept but marked unusable,
+because iOS runs no binaries.
+
+Everything then goes through **one door: the cluster's apiserver**. Reads are
+plain REST, logs stream from `pods/log`, commands run over `pods/exec`, and —
+the part that makes live telemetry possible — a TCP port inside a pod is reached
+through `pods/portforward`. Nothing is installed on the iPad's side of the
+network and no inbound access to the cluster is needed.
+
+For TMM telemetry the app injects a small exporter into each `f5-tmm` pod as an
+**ephemeral container**, which does not restart TMM. It then holds a port-forward
+tunnel open and scrapes `/metrics` every two seconds, in parallel across pods.
+There is no Prometheus in this path, so the two things Prometheus would do happen
+on the device: keeping the history, and turning counters into rates. An
+**Add** and a **Remove** button on TMM Live put the exporter in and take it out
+again; removal recreates the pods, so it asks for a typed confirmation.
+
+Backgrounding the app stops the scrape and closes the tunnel, and the resumed
+charts show a gap rather than a line drawn across minutes nobody measured.
+
+Windows are whatever width you drag them to, and the layout follows the width
+rather than the device.
+
+## Building it
+
 `BNKKit` is the transport. It is a plain Swift package with no UI, so it can be
 exercised against real clusters from a Mac before any of it is behind a view —
 which is what `bnkfield` is for.
@@ -103,19 +142,37 @@ closure capturing two `ISO8601DateFormatter`s, and a dead local kept alive by a
 Xcode and run; the project uses a synchronized file group, so new files under
 `App/BNKScopeField/` are picked up without editing the project.
 
-Two screens so far. **Clusters** imports kubeconfigs, probes each context and
+**Clusters** imports kubeconfigs, probes each context and
 reports what it found — Kubernetes version, node readiness, and BNK / DPF / NICo
 detected from pod labels rather than namespace names. **TMM Live** scrapes the
 exporter in every f5-tmm pod every two seconds, in parallel, and derives the
 panels the Grafana dashboard would: CPU from the cycle counters, throughput and
-per-tenant connection rates from the counter deltas, connections straight off the
-gauge. Cross-checked against the Prometheus the desktop build feeds — 97.46% and
+connection rates from the counter deltas, connections straight off the gauge.
+
+Virtual servers and pool members get panels of their own, and they are named as
+the cluster names them. The per-tenant panels read a `tenant-<name>-...`
+convention that only the DPU clusters follow; a cluster naming its virtual
+servers `scn-<scenario>-...-vs` had every series filtered out and showed tmm
+counters with nothing about the traffic passing through them. A virtual server
+earns a line by having carried a connection — a cluster has one per route whether
+or not anything uses it, and fourteen flat zeroes are worse than nothing. Cross-checked against the Prometheus the desktop build feeds — 97.46% and
 97.19% CPU there, 97.5% and 97.4% here.
 
 There is no Prometheus in this path, so the two things it would do happen on the
 iPad: holding the history, and turning counters into rates. Only the derived
 panel lines are kept — a scrape is ~2,400 series, and retaining all of them for
 half an hour would cost more than the app is worth.
+
+### A cluster that changes underneath
+
+The pod roster is re-listed while TMM Live is open, because it does change: a
+scenario restarts a tmm pod, and the pod that comes back carries no ephemeral
+container. Without the re-list the screen went on scraping a pod that was gone,
+offered to remove an exporter that already was, and had no way to put it back —
+the stale pod still carried the exporter in its spec, so nothing was reported
+missing. The engine retargets to the new roster without discarding the graphs,
+and the failure state carries the targets card so the exporter can be re-injected
+from where it broke.
 
 ### Sleep
 
@@ -372,5 +429,12 @@ would change what the document says.
 
 ### Known gaps
 
-- Direct mode only. The in-cluster collector, logs and the pod terminal are not
-  built.
+- **Direct mode only.** There is no in-cluster collector, so history is whatever
+  the app has been open for: charts hold half an hour, and the log buffer holds
+  what has arrived since you started following.
+- **No Forge inventory on the NICo screen.** It needs gRPC with server reflection
+  and a dynamic protobuf stack; the screen says so rather than leaving a blank.
+- **Read-only where it matters.** Installing and removing the exporter is the
+  only thing this app writes to a cluster. Service chains, workloads and
+  everything in the resource browser are shown, not edited.
+- **Secrets are not browsable**, deliberately — see Resources above.

@@ -115,7 +115,9 @@ struct TMMLiveView: View {
                  unit: "", sub: "software path · 10 s mean")
             Tile(label: "SCRAPE",
                  value: String(format: "%.2f", engine.lastDuration), unit: "s",
-                 sub: "\(engine.bytesPerScrape) samples · new tunnel each time")
+                 sub: engine.reconnects == 0
+                     ? "\(engine.bytesPerScrape) samples · tunnel held"
+                     : "\(engine.bytesPerScrape) samples · \(engine.reconnects) reconnects")
         }
     }
 

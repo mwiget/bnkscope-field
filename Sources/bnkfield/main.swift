@@ -95,6 +95,57 @@ case "scrape":
         }
     }
 
+case "bench":
+    // Ten scrapes of one pod, holding the tunnel, so the cost of keeping it can
+    // be compared with the cost of rebuilding it.
+    guard args.count >= 4 else { die(usage) }
+    let client = try KubeClient(context: try loadContext(args[0], args[1]))
+    let scraper = PodScraper(client: client, namespace: args[2], pod: args[3])
+    var kept: [Double] = []
+    for _ in 0..<10 {
+        let t = Date()
+        let s = try await scraper.scrape()
+        kept.append(Date().timeIntervalSince(t))
+        if kept.count == 1 { print("samples per scrape: \(s.count)") }
+    }
+    await scraper.stop()
+    var fresh: [Double] = []
+    for _ in 0..<10 {
+        let t = Date()
+        _ = try await client.scrape(namespace: args[2], pod: args[3], port: 9099)
+        fresh.append(Date().timeIntervalSince(t))
+    }
+    func stats(_ xs: [Double]) -> String {
+        let sorted = xs.sorted()
+        return String(format: "first %.3fs  median %.3fs  min %.3fs", xs[0], sorted[xs.count/2], sorted[0])
+    }
+    print("held tunnel:  \(stats(kept))")
+    print("fresh tunnel: \(stats(fresh))")
+    print(String(format: "steady-state speedup: %.1fx",
+                 (fresh.sorted()[5]) / (kept.dropFirst().sorted()[4])))
+
+case "hold":
+    // Scrape one pod every 2s for 120s over a held tunnel, and say how many
+    // times the tunnel had to be rebuilt.
+    guard args.count >= 4 else { die(usage) }
+    let client = try KubeClient(context: try loadContext(args[0], args[1]))
+    let scraper = PodScraper(client: client, namespace: args[2], pod: args[3])
+    let deadline = Date().addingTimeInterval(120)
+    var n = 0, failures = 0
+    var durations: [Double] = []
+    while Date() < deadline {
+        let t = Date()
+        do { _ = try await scraper.scrape(); n += 1; durations.append(Date().timeIntervalSince(t)) }
+        catch { failures += 1; FileHandle.standardError.write(Data("scrape failed: \(error)\n".utf8)) }
+        try? await Task.sleep(for: .seconds(2))
+    }
+    let sorted = durations.sorted()
+    print("scrapes: \(n)  failures: \(failures)  reconnects: \(await scraper.reconnects)")
+    if !sorted.isEmpty {
+        print(String(format: "per scrape: median %.3fs  max %.3fs", sorted[sorted.count/2], sorted.last!))
+    }
+    await scraper.stop()
+
 default:
     print(usage); exit(2)
 }

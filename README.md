@@ -96,19 +96,32 @@ than merely quiet:
 - The previous frame is dropped on resume, so the first rate after a sleep is a
   baseline rather than a counter differenced over ten minutes.
 
-### On a real device
+### Measuring on a real device
 
-Measured against `dpu-cplane-tenant1` by differencing the apiserver's
-`apiserver_request_total{subresource="portforward"}` with the app stopped and
-running: 43 requests in 120 s at rest, 87 with the app up, so 44 are the iPad's.
-That is two pods every ~5.5 s, not the 2 s the loop asks for.
+Don't use `apiserver_request_total{subresource="portforward"}` for this. It was
+the obvious lever — count port-forward requests with the app running and with it
+stopped, attribute the difference — and it is worthless here: something else on
+this lab port-forwards to the same cluster, at a rate that wanders between 43 and
+65 per two minutes. A client that made exactly **one** port-forward request over
+a two-minute run sat inside a window where the counter rose by 65.
 
-The simulator manages ~1.2 s per scrape because it shares the Mac's network
-stack; a real iPad over wifi does not. The cost is tunnel setup, paid fresh on
-every scrape, and it is the single thing most worth fixing. Until it is, the LIVE
-pill shows the cadence actually being achieved rather than the one requested — a
-pill reading 2s over a chart being drawn every 5 s is the kind of small lie that
-makes the chart beside it untrustworthy.
+An earlier version of this file claimed the iPad was managing one scrape every
+5.5 s on the strength of that counter. It was noise, not a measurement, and the
+number should not be trusted.
+
+What is measured, from a Mac against a live f5-tmm pod:
+
+| | per scrape |
+|---|---|
+| tunnel held open | median 0.109 s |
+| fresh tunnel each time | median 0.188 s |
+
+and a 120-second run at a 2 s interval: 55 scrapes, 0 failures, **0 reconnects** —
+the tunnel survives, which is the thing worth knowing.
+
+For the device the honest instrument is the app itself: the LIVE pill shows the
+cadence actually being achieved, so read it off the screen rather than inferring
+it from the cluster.
 
 ### Window sizes
 
@@ -126,8 +139,8 @@ narrow window has no way back to the cluster list.
 
 ### Known gaps
 
-- A fresh port-forward per scrape, which is where the 5.5 s goes. A tunnel held
-  open across scrapes is the fix.
+- The cadence on a real device is unmeasured. The LIVE pill reports it; nobody
+  has written down what it says.
 - No app icon yet.
 - Direct mode only. The in-cluster collector, logs and the pod terminal are not
   built.

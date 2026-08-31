@@ -121,16 +121,12 @@ extension KubeClient {
 
     /// Scrape a port inside a pod, through the apiserver.
     ///
-    /// Asks for gzip and inflates it here — on a busy tmm this is the difference
-    /// between 286 KB and 14 KB on the wire, per pod, per scrape.
+    /// One-shot: opens a tunnel, reads, closes. Fine for a probe or a test, but
+    /// a repeated scrape should hold `PodScraper` instead — the tunnel setup
+    /// dominates everything else on a real device.
     public func scrape(namespace: String, pod: String, port: Int, path: String = "/metrics") async throws -> [Sample] {
-        let tunnel = try portForward(namespace: namespace, pod: pod, port: port)
-        defer { Task { await tunnel.close() } }
-        let reply = try await tunnel.httpGet(path, headers: ["Accept-Encoding": "gzip"])
-        guard reply.status == 200 else {
-            throw KubeClient.Failure.http(reply.status, String(decoding: reply.body, as: UTF8.self))
-        }
-        let body = reply.isGzipped ? try Gzip.inflate(reply.body) : reply.body
-        return PromText.parse(body)
+        let scraper = PodScraper(client: self, namespace: namespace, pod: pod, port: port)
+        defer { Task { await scraper.stop() } }
+        return try await scraper.scrape(path: path)
     }
 }

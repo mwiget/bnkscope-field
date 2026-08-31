@@ -86,11 +86,16 @@ final class TelemetryEngine {
     /// times longer, because every scrape currently opens its own tunnel.
     private(set) var achievedInterval: TimeInterval = 0
     private(set) var bytesPerScrape: Int = 0
+    /// How often a tunnel had to be rebuilt. Zero is the expected value; a
+    /// number that climbs means something keeps dropping them.
+    private(set) var reconnects: Int = 0
     private(set) var targets: [String] = []
 
     private var client: KubeClient?
     private var namespace = ""
     private var task: Task<Void, Never>?
+    /// One per pod, each holding its tunnel open across scrapes.
+    private var scrapers: [String: PodScraper] = [:]
     /// The previous raw frame per pod, kept only long enough to difference
     /// against. Two views of it: totals per metric name, for the aggregate
     /// panels, and per series, for anything grouped by a label.
@@ -114,6 +119,9 @@ final class TelemetryEngine {
             return
         }
         state = .live
+        scrapers = Dictionary(uniqueKeysWithValues: pods.map {
+            ($0, PodScraper(client: client, namespace: namespace, pod: $0))
+        })
         task = Task { [weak self] in await self?.loop() }
     }
 
@@ -131,6 +139,11 @@ final class TelemetryEngine {
         for panel in panels.keys {
             panels[panel]!.breakLines(at: now, limit: Self.historyLimit)
         }
+        // Let the tunnels go. Holding a kubelet stream into a live TMM pod open
+        // for a screen nobody is looking at is exactly the cost this app is
+        // supposed to be careful about.
+        let leaving = scrapers.values
+        Task { for scraper in leaving { await scraper.stop() } }
     }
 
     func resume() {
@@ -154,6 +167,9 @@ final class TelemetryEngine {
         previous.removeAll()
         lastScrape = nil
         achievedInterval = 0
+        let leaving = scrapers.values
+        scrapers.removeAll()
+        Task { for scraper in leaving { await scraper.stop() } }
     }
 
     // MARK: - The loop
@@ -171,18 +187,17 @@ final class TelemetryEngine {
     }
 
     private func scrapeOnce() async {
-        guard let client else { return }
-        let ns = namespace
-        let pods = targets
+        guard client != nil else { return }
+        let active = scrapers
 
         var frames: [String: [Sample]] = [:]
         var failures: [String] = []
-        // Pods are scraped concurrently: two tunnels opened in sequence would
-        // put the samples a round-trip apart and skew every per-pod comparison.
+        // Pods are scraped concurrently: two tunnels read in sequence would put
+        // the samples a round-trip apart and skew every per-pod comparison.
         await withTaskGroup(of: (String, Result<[Sample], Error>).self) { group in
-            for pod in pods {
+            for (pod, scraper) in active {
                 group.addTask {
-                    do { return (pod, .success(try await client.scrape(namespace: ns, pod: pod, port: 9099))) }
+                    do { return (pod, .success(try await scraper.scrape())) }
                     catch { return (pod, .failure(error)) }
                 }
             }
@@ -207,6 +222,12 @@ final class TelemetryEngine {
         }
         lastScrape = now
         ingest(frames, at: now)
+        let counted = active
+        Task { [weak self] in
+            var total = 0
+            for scraper in counted.values { total += await scraper.reconnects }
+            await MainActor.run { self?.reconnects = total }
+        }
     }
 
     // MARK: - Deriving the panels

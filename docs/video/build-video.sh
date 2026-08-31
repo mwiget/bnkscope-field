@@ -45,13 +45,24 @@ for row in "${MANIFEST[@]}"; do
     n=0
     for take in "${parts[@]}"; do
         start=$(python3 -c "print($(entry "$TAKES/$take.mp4") + 1.0)")
-        # transpose=2: simctl records the framebuffer in portrait however the app
-        # is oriented. Checked against a frame rather than assumed — the other
-        # direction is also plausible and also wrong.
-        ffmpeg -v error -ss "$start" -t "$share" -i "$TAKES/$take.mp4" \
+        available=$(python3 -c "print(max(0.0, $(dur "$TAKES/$take.mp4") - $start))")
+        if python3 -c "import sys; sys.exit(0 if $available < $share - 0.3 else 1)"; then
+            echo "  !! $take has only ${available}s after its head, $scene wants ${share}s" >&2
+        fi
+        # -ss AFTER -i: seeking before the input snaps to a keyframe, and -t then
+        # measures from wherever it landed rather than from the frame asked for.
+        # Segments came out anywhere from half to double their intended length.
+        #
+        # transpose=2 because simctl records the framebuffer in portrait however
+        # the app is oriented; checked against a frame, since the other direction
+        # is equally plausible and equally sideways.
+        ffmpeg -v error -i "$TAKES/$take.mp4" -ss "$start" -t "$share" \
             -vf "transpose=2,scale=1440:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30" \
             -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -an \
             "$OUT/seg/${scene}_$n.mp4" -y
+        got=$(dur "$OUT/seg/${scene}_$n.mp4")
+        python3 -c "import sys; sys.exit(0 if abs($got - $share) < 0.35 else 1)" \
+            || echo "  !! ${scene}_$n is ${got}s, wanted ${share}s" >&2
         n=$((n+1))
     done
     printf "  %s  %ss over %s\n" "$scene" "$want" "$takes"

@@ -27,7 +27,7 @@ enum Section: String, CaseIterable, Identifiable {
 struct RootView: View {
     @Environment(ClusterStore.self) private var store
     @Environment(TelemetryEngine.self) private var engine
-    @State private var section: Section = .tmmLive
+    @State private var section: Section = .overview
     /// `.automatic`, not `.all`.
     ///
     /// Pinning it open keeps a 268 pt sidebar in a window that may be 400 pt
@@ -69,7 +69,8 @@ struct RootView: View {
                 case .nico:                NICoView(columns: $columns)
                 case .terminal:            TerminalView(columns: $columns)
                 case .telemetry:           TelemetryView(columns: $columns)
-                case .clusters, .overview: ClustersView(columns: $columns)
+                case .overview:            OverviewView(columns: $columns)
+                case .clusters:            ClustersView(columns: $columns)
                 }
             }
             .background(Theme.bg)

@@ -261,6 +261,23 @@ matched against the servers Field already holds, so `dpu-cplane-tenant1` in the
 sidebar is shown as the cluster that this control plane runs. Nothing else in
 the app says the two are related.
 
+### Overview
+
+Answers one question — is anything wrong right now, and where — with the
+clusters sorted by trouble rather than by name. It is the screen the app opens
+on.
+
+**It does not lead on restart counts, and that is the whole design.** On a
+cluster up for sixty days, argo-cd's repo-server has restarted 39 times and is
+perfectly healthy; `f5-dssm-sentinel-0` has restarted 157 times and is genuinely
+broken. The number does not separate them. What does is that one is not ready
+*now* and has warnings still arriving, so readiness and recent warnings carry the
+weight and restarts are context shown beside them.
+
+A warning older than half an hour is history rather than a live fault, and a pod
+already reported as not-ready does not get a second row saying the same thing in
+different words.
+
 ### Known gaps
 
 - Direct mode only. The in-cluster collector, logs and the pod terminal are not

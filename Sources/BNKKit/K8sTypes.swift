@@ -112,6 +112,27 @@ public enum K8s {
         public let metadata: ObjectMeta
     }
 
+    public struct Event: Decodable, Sendable {
+        public let metadata: ObjectMeta
+        public let reason: String?
+        public let message: String?
+        public let type: String?
+        public let count: Int?
+        public let lastTimestamp: Date?
+        public let eventTime: Date?
+        public let involvedObject: InvolvedObject?
+
+        public struct InvolvedObject: Decodable, Sendable {
+            public let kind: String?
+            public let name: String?
+            public let namespace: String?
+        }
+
+        /// Events written by the newer API set `eventTime` and leave
+        /// `lastTimestamp` nil; the older path does the reverse.
+        public var at: Date? { lastTimestamp ?? eventTime }
+    }
+
     public struct Secret: Decodable, Sendable {
         public let metadata: ObjectMeta
         public let data: [String: String]?
@@ -199,6 +220,16 @@ extension KubeClient {
     public func tenantControlPlanes() async throws -> [K8s.TenantControlPlane] {
         try await getJSON(K8s.List<K8s.TenantControlPlane>.self,
                           "/apis/kamaji.clastix.io/v1alpha1/tenantcontrolplanes").items
+    }
+
+    /// Warning events, cluster-wide.
+    ///
+    /// The server-side filter matters: on a busy cluster the Normal events
+    /// outnumber the Warnings by orders of magnitude, and none of them are what
+    /// "is anything wrong" is asking about.
+    public func warningEvents() async throws -> [K8s.Event] {
+        try await getJSON(K8s.List<K8s.Event>.self, "/api/v1/events",
+                          query: ["fieldSelector": "type=Warning"]).items
     }
 
     public func namespaces() async throws -> [String] {

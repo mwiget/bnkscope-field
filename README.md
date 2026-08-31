@@ -62,3 +62,45 @@ developer's Mac is their Xcode signing identity.
 | `Gzip.swift` | inflation — the exporter compresses ~20× |
 | `PromText.swift` | the exposition format, gauges only |
 | `K8sTypes.swift` | the API objects the UI renders |
+
+## The app
+
+`App/BNKScopeField.xcodeproj` — a SwiftUI iPad app on top of `BNKKit`. Open it in
+Xcode and run; the project uses a synchronized file group, so new files under
+`App/BNKScopeField/` are picked up without editing the project.
+
+Two screens so far. **Clusters** imports kubeconfigs, probes each context and
+reports what it found — Kubernetes version, node readiness, and BNK / DPF / NICo
+detected from pod labels rather than namespace names. **TMM Live** scrapes the
+exporter in every f5-tmm pod every two seconds, in parallel, and derives the
+panels the Grafana dashboard would: CPU from the cycle counters, throughput and
+per-tenant connection rates from the counter deltas, connections straight off the
+gauge. Cross-checked against the Prometheus the desktop build feeds — 97.46% and
+97.19% CPU there, 97.5% and 97.4% here.
+
+There is no Prometheus in this path, so the two things it would do happen on the
+iPad: holding the history, and turning counters into rates. Only the derived
+panel lines are kept — a scrape is ~2,400 series, and retaining all of them for
+half an hour would cost more than the app is worth.
+
+### Sleep
+
+Backgrounding stops the scrape, because leaving a tunnel open into a live TMM pod
+for a session nobody is watching is not free. Two details make that honest rather
+than merely quiet:
+
+- The moment the scrape stops is recorded as a break in every line, so the charts
+  show a gap. A chart that joins the sample before a sleep to the sample after it
+  draws a clean ramp across minutes that were never measured, which is worse than
+  a hole because it looks like data.
+- The previous frame is dropped on resume, so the first rate after a sleep is a
+  baseline rather than a counter differenced over ten minutes.
+
+### Known gaps
+
+- A fresh port-forward per scrape. It works — ~1.2 s for two pods against a 2 s
+  interval — but half the budget goes on tunnel setup that a kept-open connection
+  would not pay.
+- No app icon yet.
+- Direct mode only. The in-cluster collector, logs and the pod terminal are not
+  built.

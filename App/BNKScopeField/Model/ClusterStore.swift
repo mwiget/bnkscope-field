@@ -1,0 +1,216 @@
+import Foundation
+import Observation
+import BNKKit
+
+/// A cluster as the app knows it: the kubeconfig context, plus whatever probing
+/// it has learned.
+@Observable
+@MainActor
+final class ManagedCluster: Identifiable {
+    let context: Kubeconfig.Context
+    let sourceFile: String
+
+    /// `nonisolated` because the identity is the context name, which is a `let`
+    /// fixed at init — SwiftUI reads it off the main actor while diffing lists,
+    /// and nothing about it can race.
+    nonisolated var id: String { context.name }
+
+    /// What to call this cluster in the UI.
+    ///
+    /// Context names are written for kubectl, not for reading:
+    /// `kubernetes-admin@dpu-cplane-tenant1` says one useful word and eleven
+    /// that are the same on every context. The useful word is the cluster, so
+    /// that is what is shown — unless the cluster is called something kubeadm
+    /// picked, in which case the file it came from is a better clue than
+    /// "kubernetes" is.
+    nonisolated var displayName: String {
+        let generic: Set<String> = ["kubernetes", "default", "cluster.local", "kind"]
+        let afterAt = context.name.split(separator: "@").last.map(String.init)
+        for candidate in [afterAt, context.clusterName].compactMap({ $0 }) {
+            if !generic.contains(candidate) { return candidate }
+        }
+        let stem = sourceFile.replacingOccurrences(of: ".config", with: "")
+                             .replacingOccurrences(of: ".yaml", with: "")
+                             .replacingOccurrences(of: ".yml", with: "")
+        return stem.isEmpty ? context.name : stem
+    }
+
+    enum Reach: Equatable {
+        case unprobed
+        case reachable(version: String, nodes: Int, ready: Int)
+        case unreachable(String)
+        case unusable(String)
+    }
+
+    var reach: Reach = .unprobed
+    var roles: Set<Role> = []
+    var tmmPods: [K8s.Pod] = []
+
+    enum Role: String, CaseIterable, Comparable {
+        case bnk = "BNK", dpf = "DPF", nico = "NICo"
+        static func < (a: Role, b: Role) -> Bool { a.rawValue < b.rawValue }
+    }
+
+    private var cached: KubeClient?
+
+    init(context: Kubeconfig.Context, sourceFile: String) {
+        self.context = context
+        self.sourceFile = sourceFile
+        if case .unsupported(let why) = context.auth { reach = .unusable(why) }
+    }
+
+    func client() throws -> KubeClient {
+        if let cached { return cached }
+        let c = try KubeClient(context: context, tag: "bnkscope.field.\(context.name)")
+        cached = c
+        return c
+    }
+
+    var isUsable: Bool {
+        if case .unusable = reach { return false }
+        return true
+    }
+
+    /// Ask the cluster what it is.
+    ///
+    /// Roles are read from pod labels rather than namespace names, because on a
+    /// real deployment these live on different clusters and the namespaces vary
+    /// by install shape — the same reason bnkscope detects them this way.
+    func probe() async {
+        guard isUsable else { return }
+        do {
+            let c = try client()
+            let version = try await c.version()
+            let nodes = try await c.nodes()
+            reach = .reachable(version: version.gitVersion,
+                               nodes: nodes.count,
+                               ready: nodes.filter(\.isReady).count)
+
+            var found: Set<Role> = []
+            let tmm = try await c.pods(labelSelector: "app=f5-tmm")
+            if !tmm.isEmpty { found.insert(.bnk) }
+            tmmPods = tmm
+            // Every DPF-managed workload carries a svc.dpu.nvidia.com/ label.
+            if tmm.contains(where: { ($0.metadata.labels ?? [:]).keys.contains { $0.hasPrefix("svc.dpu.nvidia.com/") } }) {
+                found.insert(.dpf)
+            }
+            if try await !c.pods(labelSelector: "app.kubernetes.io/name=nico-api").isEmpty {
+                found.insert(.nico)
+            }
+            roles = found
+        } catch {
+            reach = .unreachable(Self.explain(error))
+            tmmPods = []
+        }
+    }
+
+    /// A URLError says almost nothing useful on its own. The two cases that
+    /// actually happen here are worth naming, because the fix differs: a
+    /// kubeconfig pointing somewhere this device cannot route, versus a
+    /// certificate the device will not accept.
+    static func explain(_ error: Error) -> String {
+        guard let url = error as? URLError else { return String(describing: error) }
+        switch url.code {
+        case .cannotConnectToHost, .timedOut, .networkConnectionLost:
+            return "no route to this address from the iPad"
+        case .secureConnectionFailed, .serverCertificateUntrusted,
+             .serverCertificateHasBadDate, .serverCertificateNotYetValid:
+            return "the TLS handshake failed — check the certificate authority in the kubeconfig"
+        default:
+            return url.localizedDescription
+        }
+    }
+}
+
+/// Every cluster the app holds, and the kubeconfigs they came from.
+@Observable
+@MainActor
+final class ClusterStore {
+    private(set) var clusters: [ManagedCluster] = []
+    private(set) var files: [String] = []
+    var selected: ManagedCluster.ID?
+    var importError: String?
+
+    /// Kubeconfigs live in Application Support, excluded from backup. The
+    /// certificates inside them are also imported into the keychain, which is
+    /// what actually gets used; this copy is what lets the app rebuild that
+    /// after a reinstall without asking for the file again.
+    private static var directory: URL {
+        let base = URL.applicationSupportDirectory.appending(path: "kubeconfigs")
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        return base
+    }
+
+    func load() {
+        clusters.removeAll()
+        files.removeAll()
+        let urls = (try? FileManager.default.contentsOfDirectory(at: Self.directory,
+                                                                 includingPropertiesForKeys: nil)) ?? []
+        for url in urls.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            adopt(url)
+        }
+        selectSomethingUseful()
+    }
+
+    /// Prefer a cluster that has something to show. Landing on a reachable
+    /// cluster with no TMM pods and the message "looking for TMM pods" reads as
+    /// a fault when it is only a bad default.
+    private func selectSomethingUseful() {
+        guard selected == nil || current?.isUsable != true else { return }
+        selected = clusters.first { $0.roles.contains(.bnk) }?.id
+            ?? clusters.first { if case .reachable = $0.reach { return true } else { return false } }?.id
+            ?? clusters.first(where: \.isUsable)?.id
+    }
+
+    /// Copy an imported file in and adopt its contexts.
+    func importKubeconfig(from source: URL, named name: String? = nil) {
+        importError = nil
+        let needsScope = source.startAccessingSecurityScopedResource()
+        defer { if needsScope { source.stopAccessingSecurityScopedResource() } }
+        do {
+            let data = try Data(contentsOf: source)
+            // Parse before storing: a file that is not a kubeconfig should be
+            // refused at the picker, not discovered on the next launch.
+            _ = try Kubeconfig(yaml: String(decoding: data, as: UTF8.self))
+            let target = Self.directory.appending(path: name ?? source.lastPathComponent)
+            try data.write(to: target, options: [.atomic, .completeFileProtection])
+            adopt(target)
+            selectSomethingUseful()
+        } catch {
+            importError = String(describing: error)
+        }
+    }
+
+    func remove(_ cluster: ManagedCluster) {
+        if case .clientCertificate(let certPEM, _) = cluster.context.auth {
+            Identity.forget(tag: "bnkscope.field.\(cluster.context.name)", certPEM: certPEM)
+        }
+        clusters.removeAll { $0.id == cluster.id }
+        if selected == cluster.id { selected = clusters.first(where: \.isUsable)?.id }
+    }
+
+    func probeAll() async {
+        await withTaskGroup(of: Void.self) { group in
+            for cluster in clusters where cluster.isUsable {
+                group.addTask { await cluster.probe() }
+            }
+        }
+        // Roles are only known once probing has answered, so the default choice
+        // is worth revisiting now rather than at load.
+        selected = nil
+        selectSomethingUseful()
+    }
+
+    var current: ManagedCluster? {
+        clusters.first { $0.id == selected }
+    }
+
+    private func adopt(_ url: URL) {
+        guard let text = try? String(contentsOf: url, encoding: .utf8),
+              let config = try? Kubeconfig(yaml: text) else { return }
+        files.append(url.lastPathComponent)
+        for context in config.contexts where !clusters.contains(where: { $0.id == context.name }) {
+            clusters.append(ManagedCluster(context: context, sourceFile: url.lastPathComponent))
+        }
+    }
+}

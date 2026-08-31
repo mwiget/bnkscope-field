@@ -69,7 +69,11 @@ case "pods":
     let pods = try await client.pods(namespace: ns, labelSelector: sel)
     print("\(pods.count) pods")
     for p in pods.prefix(40) {
-        let eph = p.hasEphemeral("tmm-stat-exporter") ? "  [exporter]" : ""
+        let eph = switch p.container(named: "tmm-stat-exporter") {
+        case .durable:   "  [exporter]"
+        case .ephemeral: "  [exporter, ephemeral]"
+        case nil:        ""
+        }
         print("  \(pad(p.metadata.name, 46)) \(pad(p.ready, 6)) \(pad(p.status?.phase ?? "?", 10)) \(p.node)\(eph)")
     }
 

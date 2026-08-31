@@ -52,11 +52,31 @@ public enum K8s {
             let cs = status?.containerStatuses ?? []
             return "\(cs.filter { $0.ready == true }.count)/\(cs.count)"
         }
-        /// The exporter is injected as an ephemeral container, so its presence is
-        /// read from a different list than the pod's declared containers.
-        public func hasEphemeral(_ name: String) -> Bool {
-            (status?.ephemeralContainerStatuses ?? []).contains { $0.name == name }
+
+        /// How a container came to be in this pod, which decides how long it
+        /// lasts.
+        public enum ContainerKind: Sendable {
+            /// Declared in the pod spec. Survives a restart of the pod.
+            case durable
+            /// Attached to a running pod after the fact. Cannot be removed in
+            /// place, and is gone the moment the pod is recreated.
+            case ephemeral
         }
+
+        /// Where a container is, if it is here at all.
+        ///
+        /// bnkscope injects the exporter as an ephemeral container, but a
+        /// cluster can equally have it in the pod spec — the lab this was
+        /// written against does. Reporting which is not pedantry: an ephemeral
+        /// exporter stops the next time TMM restarts, and a page that does not
+        /// say so lets you find out later.
+        public func container(named name: String) -> ContainerKind? {
+            if (status?.containerStatuses ?? []).contains(where: { $0.name == name }) { return .durable }
+            if (status?.ephemeralContainerStatuses ?? []).contains(where: { $0.name == name }) { return .ephemeral }
+            return nil
+        }
+
+        public func has(container name: String) -> Bool { container(named: name) != nil }
     }
 
     public struct Node: Decodable, Sendable {

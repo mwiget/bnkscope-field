@@ -153,6 +153,36 @@ this app draws its own header rows and hides the navigation bar, the split view'
 built-in sidebar button goes with it — hence the explicit toggle, without which a
 narrow window has no way back to the cluster list.
 
+### Installing the exporter
+
+The Telemetry screen adds the exporter to f5-tmm pods as an **ephemeral
+container** and nothing else. The two durable alternatives — patching the
+workload, or a mutating admission webhook — both restart TMM, and the webhook
+additionally installs a cluster-scoped configuration with a long-lived CA.
+Neither belongs behind a button in a troubleshooting tool.
+
+It differs from the desktop build in one way that simplifies it a great deal: no
+`TMSTAT_REMOTE_WRITE_URL`. With that empty the exporter serves `/metrics` and
+pushes nowhere, and `/metrics` is exactly what Field reads back through the
+apiserver. There is no Prometheus to point at, so the heuristic that guesses a
+reachable host address for one is not needed either.
+
+Removal is deliberately harder than installation, and sometimes refused outright.
+An ephemeral container cannot be taken out of a running pod, so clearing one
+means recreating the pod — a typed confirmation, not a click, because it drops
+dataplane traffic. And where the exporter is **in the pod template** — which is
+the case on the DPF cluster this was built against — removal is declined rather
+than attempted: deleting the pods would drop traffic and the exporter would come
+straight back with the replacements. The screen names the workload it has to be
+removed from instead.
+
+### Panels
+
+Double-tap a panel — or double-click, with a trackpad — to give it the whole
+window, and again to put it back. There is an expand button in each panel header
+too, because a gesture nobody can see is a feature nobody finds, and Escape
+closes it for anyone on a keyboard.
+
 ### Known gaps
 
 - No app icon yet.

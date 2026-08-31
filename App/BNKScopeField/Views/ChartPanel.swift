@@ -11,6 +11,11 @@ struct ChartPanel: View {
     let panel: PanelID
     let data: PanelData
     var height: CGFloat = 182
+    /// Whether this panel is currently filling the window.
+    var isZoomed = false
+    /// Nil when zooming is not offered — a zoomed panel with no way out would
+    /// be a trap.
+    var onToggleZoom: (() -> Void)?
 
     @State private var scrubbed: Date?
 
@@ -32,13 +37,32 @@ struct ChartPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(panel.title)
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundStyle(Theme.fg)
-                Text(panel.unit)
-                    .font(Theme.mono(10.5))
-                    .foregroundStyle(Theme.muted)
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(panel.title)
+                        .font(.system(size: isZoomed ? 16 : 13.5, weight: .semibold))
+                        .foregroundStyle(Theme.fg)
+                    Text(panel.unit)
+                        .font(Theme.mono(isZoomed ? 11.5 : 10.5))
+                        .foregroundStyle(Theme.muted)
+                }
+                Spacer(minLength: 0)
+                if let onToggleZoom {
+                    // The double-tap does the same thing, but a gesture nobody
+                    // can see is a feature nobody finds.
+                    Button(action: onToggleZoom) {
+                        Image(systemName: isZoomed
+                              ? "arrow.down.right.and.arrow.up.left"
+                              : "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Theme.muted)
+                            .frame(width: 26, height: 26)
+                            .background(Theme.secondary, in: RoundedRectangle(cornerRadius: 7))
+                            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.border))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isZoomed ? "Collapse \(panel.title)" : "Expand \(panel.title)")
+                }
             }
 
             legend
@@ -51,6 +75,10 @@ struct ChartPanel: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border))
+        .contentShape(Rectangle())
+        // Double-tap on touch, double-click with a trackpad or mouse — the
+        // gesture people already use to blow something up and put it back.
+        .onTapGesture(count: 2) { onToggleZoom?() }
     }
 
     /// Always present for two or more lines, so identity never rests on colour

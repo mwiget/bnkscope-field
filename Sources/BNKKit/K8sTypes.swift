@@ -14,7 +14,20 @@ public enum K8s {
         public let name: String
         public let namespace: String?
         public let labels: [String: String]?
+        public let annotations: [String: String]?
         public let creationTimestamp: Date?
+        public let ownerReferences: [OwnerReference]?
+    }
+
+    public struct OwnerReference: Decodable, Sendable {
+        public let kind: String
+        public let name: String
+        public let controller: Bool?
+    }
+
+    /// Just enough of a ReplicaSet to hop from it to the Deployment that made it.
+    public struct ReplicaSet: Decodable, Sendable {
+        public let metadata: ObjectMeta
     }
 
     public struct List<Item: Decodable & Sendable>: Decodable, Sendable {
@@ -29,6 +42,11 @@ public enum K8s {
         public struct Spec: Decodable, Sendable {
             public let nodeName: String?
             public let containers: [Container]
+            public let ephemeralContainers: [Container]?
+            public let volumes: [Volume]?
+        }
+        public struct Volume: Decodable, Sendable {
+            public let name: String
         }
         public struct Container: Decodable, Sendable {
             public let name: String

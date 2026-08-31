@@ -4,6 +4,7 @@ enum Section: String, CaseIterable, Identifiable {
     case overview = "Overview"
     case tmmLive  = "TMM Live"
     case clusters = "Clusters"
+    case telemetry = "Telemetry"
 
     var id: String { rawValue }
 
@@ -12,6 +13,7 @@ enum Section: String, CaseIterable, Identifiable {
         case .overview: return "square.grid.2x2"
         case .tmmLive:  return "waveform.path.ecg"
         case .clusters: return "square.stack.3d.up"
+        case .telemetry: return "square.3.layers.3d"
         }
     }
 }
@@ -56,7 +58,8 @@ struct RootView: View {
         } detail: {
             Group {
                 switch section {
-                case .tmmLive:            TMMLiveView(columns: $columns)
+                case .tmmLive:             TMMLiveView(columns: $columns)
+                case .telemetry:           TelemetryView(columns: $columns)
                 case .clusters, .overview: ClustersView(columns: $columns)
                 }
             }

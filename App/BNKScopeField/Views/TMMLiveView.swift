@@ -4,6 +4,8 @@ import BNKKit
 struct TMMLiveView: View {
     @Binding var columns: NavigationSplitViewVisibility
     @State private var explainingMode = false
+    @State private var zoomed: PanelID?
+    @Namespace private var panelZoom
     @Environment(ClusterStore.self) private var store
     @Environment(TelemetryEngine.self) private var engine
 
@@ -132,6 +134,8 @@ struct TMMLiveView: View {
             Message(title: "Looking for TMM pods",
                     detail: "Field scrapes the exporter inside each f5-tmm pod through the apiserver.",
                     tone: Theme.muted)
+        case _ where zoomed != nil:
+            zoomedPanel
         default:
             ScrollView {
                 VStack(spacing: 16) {
@@ -139,7 +143,9 @@ struct TMMLiveView: View {
                     LazyVGrid(columns: grid, spacing: 14) {
                         ForEach(PanelID.allCases, id: \.self) { panel in
                             if let data = engine.panels[panel], !data.lines.isEmpty {
-                                ChartPanel(panel: panel, data: data)
+                                ChartPanel(panel: panel, data: data,
+                                           onToggleZoom: { zoom(panel) })
+                                    .matchedGeometryEffect(id: panel, in: panelZoom)
                             }
                         }
                     }
@@ -152,6 +158,33 @@ struct TMMLiveView: View {
 
     /// Wraps rather than squeezing. Four tiles across is right on a full-width
     /// window and unreadable in a narrow one.
+    /// One panel, filling the window.
+    ///
+    /// The plot is sized from the space actually available rather than a fixed
+    /// height — the whole point of zooming in is to spend the window on the
+    /// chart.
+    @ViewBuilder
+    private var zoomedPanel: some View {
+        if let panel = zoomed, let data = engine.panels[panel] {
+            GeometryReader { geometry in
+                ChartPanel(panel: panel, data: data,
+                           height: max(160, geometry.size.height - 150),
+                           isZoomed: true,
+                           onToggleZoom: { zoom(nil) })
+                    .matchedGeometryEffect(id: panel, in: panelZoom)
+                    .frame(height: geometry.size.height)
+            }
+            .padding(20)
+            // A keyboard or trackpad user reaches for Escape before they reach
+            // for the button.
+            .onKeyPress(.escape) { zoom(nil); return .handled }
+        }
+    }
+
+    private func zoom(_ panel: PanelID?) {
+        withAnimation(.snappy(duration: 0.28)) { zoomed = panel }
+    }
+
     private var tiles: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 168), spacing: 14)], spacing: 14) {
             Tile(label: "TMM PODS", value: "\(engine.targets.count)", unit: "", sub: "scraped in parallel")

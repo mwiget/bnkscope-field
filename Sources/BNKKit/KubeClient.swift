@@ -74,6 +74,20 @@ public final class KubeClient: NSObject, Sendable {
         return data
     }
 
+    /// Any method, with the body returned. `get` is the read path; this is
+    /// everything that changes something.
+    @discardableResult
+    public func send(_ method: String, _ path: String, query: [String: String] = [:],
+                     body: Data? = nil, contentType: String? = nil) async throws -> Data {
+        let (data, response) = try await session.data(
+            for: try request(method, path, query: query, body: body, contentType: contentType))
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(code) else {
+            throw Failure.http(code, String(data: data, encoding: .utf8) ?? "")
+        }
+        return data
+    }
+
     public func getJSON<T: Decodable>(_ type: T.Type, _ path: String, query: [String: String] = [:]) async throws -> T {
         try Self.decoder.decode(T.self, from: try await get(path, query: query))
     }

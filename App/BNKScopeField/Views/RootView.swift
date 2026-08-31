@@ -9,7 +9,6 @@ enum Section: String, CaseIterable, Identifiable {
     case dpu = "DPU Services"
     case nico = "NICo"
     case terminal = "Terminal"
-    case telemetry = "Telemetry"
 
     var id: String { rawValue }
 
@@ -23,7 +22,6 @@ enum Section: String, CaseIterable, Identifiable {
         case .dpu: return "point.3.connected.trianglepath.dotted"
         case .nico: return "network"
         case .terminal: return "apple.terminal"
-        case .telemetry: return "square.3.layers.3d"
         }
     }
 }
@@ -74,7 +72,6 @@ struct RootView: View {
                 case .dpu:                 DPUView(columns: $columns)
                 case .nico:                NICoView(columns: $columns)
                 case .terminal:            TerminalView(columns: $columns)
-                case .telemetry:           TelemetryView(columns: $columns)
                 case .overview:            OverviewView(columns: $columns)
                 case .clusters:            ClustersView(columns: $columns)
                 case .resources:           ResourcesView(columns: $columns)

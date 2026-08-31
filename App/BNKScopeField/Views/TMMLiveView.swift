@@ -130,10 +130,11 @@ struct TMMLiveView: View {
         case .idle where store.current == nil:
             Message(title: "No cluster selected",
                     detail: "Pick a reachable cluster in the sidebar, or import a kubeconfig.", tone: Theme.muted)
+        case .idle where (store.current?.tmmPods.isEmpty ?? true):
+            Message(title: "No f5-tmm pods here",
+                    detail: "TMM Live needs a cluster running BNK. This one has nothing to scrape.")
         case .idle:
-            Message(title: "Looking for TMM pods",
-                    detail: "Field scrapes the exporter inside each f5-tmm pod through the apiserver.",
-                    tone: Theme.muted)
+            ExporterPanel(style: .prompt)
         case _ where zoomed != nil:
             zoomedPanel
         default:
@@ -149,7 +150,7 @@ struct TMMLiveView: View {
                             }
                         }
                     }
-                    targets
+                    ExporterPanel(style: .card)
                 }
                 .padding(20)
             }
@@ -226,84 +227,6 @@ struct TMMLiveView: View {
         return tail.reduce(0, +) / Double(tail.count)
     }
 
-    private var targets: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Text("Exporter targets").font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Theme.fg)
-                Text("tmm-stat-exporter")
-                    .font(Theme.mono(11)).foregroundStyle(Theme.muted)
-                Spacer()
-            }
-            ForEach(store.current?.tmmPods ?? [], id: \.metadata.name) { pod in
-                targetRow(pod)
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border))
-    }
-
-    /// One exporter target.
-    ///
-    /// The dot answers "is this pod talking to me right now", which is the only
-    /// question the list is really being asked. How the exporter got into the
-    /// pod is a separate fact and is written as one — in the muted style, not in
-    /// a status colour, because being in the pod spec is not good news or bad
-    /// news, it is just how it was installed. Only the ephemeral case earns a
-    /// colour, because it is a caveat: it will not survive a TMM restart.
-    @ViewBuilder
-    private func targetRow(_ pod: K8s.Pod) -> some View {
-        let status = engine.podStatus[pod.metadata.name]
-        HStack(spacing: 12) {
-            StatusDot(color: dotColour(for: status, pod: pod),
-                      glow: { if case .answering = status { true } else { false } }())
-            VStack(alignment: .leading, spacing: 3) {
-                Text(pod.metadata.name)
-                    .font(Theme.mono(12)).foregroundStyle(Theme.fg)
-                    .lineLimit(1).truncationMode(.middle)
-                Text(detail(for: status, pod: pod))
-                    .font(Theme.mono(10.5))
-                    .foregroundStyle({ if case .failing = status { Theme.warn } else { Theme.faint } }())
-                    .lineLimit(1).truncationMode(.tail)
-            }
-            Spacer(minLength: 8)
-            Text(pod.node)
-                .font(Theme.mono(11.5)).foregroundStyle(Theme.muted)
-                .lineLimit(1).truncationMode(.middle)
-            if pod.container(named: "tmm-stat-exporter") == .ephemeral {
-                Badge(text: "ephemeral", color: Theme.warn)
-            }
-        }
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .background(Theme.bg, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.border))
-    }
-
-    private func dotColour(for status: TelemetryEngine.PodStatus?, pod: K8s.Pod) -> Color {
-        switch status {
-        case .answering:              return Theme.ok
-        case .failing:                return Theme.bad
-        case nil:                     return pod.has(container: "tmm-stat-exporter") ? Theme.muted : Theme.warn
-        }
-    }
-
-    private func detail(for status: TelemetryEngine.PodStatus?, pod: K8s.Pod) -> String {
-        switch status {
-        case .answering(let n):
-            let how = pod.container(named: "tmm-stat-exporter") == .ephemeral
-                ? "ephemeral container — goes when the pod is recreated"
-                : "exporter in the pod spec"
-            return "\(n) samples · \(how)"
-        case .failing(let why):
-            return why
-        case nil:
-            return pod.has(container: "tmm-stat-exporter")
-                ? "exporter present, not scraped yet"
-                : "no tmm-stat-exporter in this pod"
-        }
-    }
-
     // MARK: - Wiring
 
     private func follow() async {
@@ -312,7 +235,11 @@ struct TMMLiveView: View {
         if case .unprobed = cluster.reach { await cluster.probe() }
         guard case .reachable = cluster.reach else { return }
         let pods = cluster.tmmPods.filter { $0.has(container: "tmm-stat-exporter") }
-        guard let namespace = cluster.tmmPods.first?.metadata.namespace,
+        // Nothing carrying the exporter is not a failure; it is the state the
+        // install prompt exists for. Starting the engine here would report "no
+        // f5-tmm pods" instead, which is both wrong and a dead end.
+        guard !pods.isEmpty,
+              let namespace = cluster.tmmPods.first?.metadata.namespace,
               let client = try? cluster.client() else { return }
         engine.start(client: client, namespace: namespace, pods: pods.map(\.metadata.name))
     }

@@ -155,7 +155,18 @@ narrow window has no way back to the cluster list.
 
 ### Installing the exporter
 
-The Telemetry screen adds the exporter to f5-tmm pods as an **ephemeral
+Installing and removing the exporter lives on **TMM Live**, not in a menu entry
+of its own. It had one, and it was wrong twice over: it put a thing you configure
+beside seven things you look at, and it split one subject in two — TMM Live
+listed which pods carried the exporter and could do nothing about it, while
+another screen could act but showed no graphs. The state and the actions belong
+on the screen that is empty without them.
+
+So the Exporter targets card carries Add and Remove, and a cluster whose TMM pods
+have no exporter gets an install prompt where the charts would be, rather than a
+dead end reading "looking for TMM pods".
+
+TMM Live adds the exporter to f5-tmm pods as an **ephemeral
 container** and nothing else. The two durable alternatives — patching the
 workload, or a mutating admission webhook — both restart TMM, and the webhook
 additionally installs a cluster-scoped configuration with a long-lived CA.

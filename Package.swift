@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "bnkscope-field",
-    platforms: [.iOS("26.0"), .macOS("14.0")],
+    platforms: [.iOS("27.0"), .macOS("14.0")],
     products: [
         .library(name: "BNKKit", targets: ["BNKKit"]),
         .executable(name: "bnkfield", targets: ["bnkfield"]),

@@ -72,6 +72,16 @@ which put the healthiest state on screen in the same colour as STALLED
 live light is red; a monitoring convention says red is trouble, and this is a
 monitoring tool. The brand red now belongs to the mark and nothing else.
 
+## Toolchain
+
+Xcode 27 and the iOS 27 SDK, deployment target 27 — the OS the device this was
+built for actually runs. Building against 26 and deploying to a 27 device worked,
+but only by accident of compatibility.
+
+Xcode 27's stricter concurrency checking is worth having: it caught a `@Sendable`
+closure capturing two `ISO8601DateFormatter`s, and a dead local kept alive by a
+`_ = run` that existed only to quiet the compiler.
+
 ## The app
 
 `App/BNKScopeField.xcodeproj` — a SwiftUI iPad app on top of `BNKKit`. Open it in

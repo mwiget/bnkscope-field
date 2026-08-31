@@ -31,7 +31,7 @@ enum Section: String, CaseIterable, Identifiable {
 struct RootView: View {
     @Environment(ClusterStore.self) private var store
     @Environment(TelemetryEngine.self) private var engine
-    @State private var section: Section = .overview
+    @Environment(Navigator.self) private var navigator
     /// `.automatic`, not `.all`.
     ///
     /// Pinning it open keeps a 268 pt sidebar in a window that may be 400 pt
@@ -62,12 +62,13 @@ struct RootView: View {
     }
 
     private var split: some View {
-        NavigationSplitView(columnVisibility: $columns) {
-            Sidebar(section: $section)
+        @Bindable var navigator = navigator
+        return NavigationSplitView(columnVisibility: $columns) {
+            Sidebar(section: $navigator.section)
                 .navigationSplitViewColumnWidth(min: 260, ideal: 268, max: 320)
         } detail: {
             Group {
-                switch section {
+                switch navigator.section {
                 case .tmmLive:             TMMLiveView(columns: $columns)
                 case .logs:                LogsView(columns: $columns)
                 case .dpu:                 DPUView(columns: $columns)

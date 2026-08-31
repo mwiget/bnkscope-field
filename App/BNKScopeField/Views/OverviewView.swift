@@ -5,6 +5,7 @@ struct OverviewView: View {
     @Binding var columns: NavigationSplitViewVisibility
     @Environment(ClusterStore.self) private var store
     @Environment(OverviewEngine.self) private var overview
+    @Environment(Navigator.self) private var navigator
 
     var body: some View {
         VStack(spacing: 0) {
@@ -17,7 +18,13 @@ struct OverviewView: View {
                 ScrollView {
                     VStack(spacing: 14) {
                         ForEach(overview.reports) { report in
-                            ReportCard(report: report) { store.selected = report.id }
+                            ReportCard(report: report,
+                                       select: { store.selected = report.id },
+                                       open: { finding in
+                                           store.selected = report.id
+                                           navigator.reveal(pod: finding.pod ?? "",
+                                                            namespace: finding.namespace)
+                                       })
                         }
                         if overview.reports.isEmpty && !overview.scanning {
                             Text("Nothing scanned yet.")
@@ -59,6 +66,7 @@ struct OverviewView: View {
 private struct ReportCard: View {
     let report: OverviewEngine.Report
     let select: () -> Void
+    let open: (OverviewEngine.Finding) -> Void
 
     private var tone: Color {
         switch report.severity {
@@ -94,7 +102,12 @@ private struct ReportCard: View {
                 .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.border))
             } else {
                 ForEach(report.findings) { finding in
-                    FindingRow(finding: finding)
+                    if finding.pod != nil {
+                        Button { open(finding) } label: { FindingRow(finding: finding, openable: true) }
+                            .buttonStyle(.plain)
+                    } else {
+                        FindingRow(finding: finding, openable: false)
+                    }
                 }
             }
         }
@@ -108,6 +121,9 @@ private struct ReportCard: View {
 
 private struct FindingRow: View {
     let finding: OverviewEngine.Finding
+    /// Whether this row leads anywhere. A chevron on a row that goes nowhere is
+    /// a promise the screen cannot keep.
+    var openable = false
 
     private var tone: Color {
         switch finding.severity {
@@ -133,6 +149,9 @@ private struct FindingRow: View {
             Spacer(minLength: 0)
             if let namespace = finding.namespace {
                 Text(namespace).font(Theme.mono(11)).foregroundStyle(Theme.faint).lineLimit(1)
+            }
+            if openable {
+                Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(Theme.faint)
             }
         }
         .padding(.horizontal, 13).padding(.vertical, 10)

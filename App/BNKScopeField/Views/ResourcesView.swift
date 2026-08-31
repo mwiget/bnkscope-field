@@ -5,6 +5,7 @@ struct ResourcesView: View {
     @Binding var columns: NavigationSplitViewVisibility
     @Environment(ClusterStore.self) private var store
     @Environment(ResourceEngine.self) private var resources
+    @Environment(Navigator.self) private var navigator
 
     @State private var opened: RawObject?
 
@@ -20,6 +21,8 @@ struct ResourcesView: View {
         .background(Theme.bg)
         .toolbar(.hidden, for: .navigationBar)
         .task(id: "\(store.selected ?? "")#\(store.current?.probeGeneration ?? 0)") { await start() }
+        // Another screen may have sent us here to look at one object.
+        .task(id: navigator.pending) { await honourRequest() }
         .sheet(item: $opened) { object in
             // A page-sized sheet, not the default card: a pod's event list and
             // its YAML are both things you read, and reading them through a
@@ -126,7 +129,25 @@ struct ResourcesView: View {
     private func start() async {
         guard let cluster = store.current else { return }
         await resources.loadNamespaces(cluster)
+        // A pending request decides what to load; loading the default first
+        // would be a wasted round trip and a visible flicker.
+        if navigator.pending == nil { await resources.load(cluster) }
+    }
+
+    /// Show the object another screen asked for, and open it.
+    ///
+    /// Without this, Overview could name a broken pod and do nothing about it —
+    /// which is the state the screen was in when someone asked how to open one.
+    private func honourRequest() async {
+        guard let request = navigator.pending, let cluster = store.current else { return }
+        if let kind = ResourceKind.all.first(where: { $0.plural == request.kind }) {
+            resources.kind = kind
+        }
+        resources.namespace = request.namespace
+        resources.query = ""
         await resources.load(cluster)
+        opened = resources.objects.first { $0.name == request.name }
+        navigator.clear()
     }
 
     private func reload() async {

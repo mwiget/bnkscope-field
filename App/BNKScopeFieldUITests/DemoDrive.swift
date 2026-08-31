@@ -64,9 +64,36 @@ final class DemoDrive: XCTestCase {
 
     // MARK: - Beats
 
-    func beat2ImportTenant1() throws {
+    /// The app with nothing in it.
+    func beat1Empty() throws {
+        dwell(Beat.settle)
+    }
+
+    /// The empty app, and the tap that starts the import.
+    ///
+    /// It stops at the tap. What opens next is the system document picker —
+    /// Apple's UI, in another process, showing nothing about this app — so the
+    /// cut lands on the cluster appearing instead. The import itself is real;
+    /// only the file-browsing is off camera.
+    func beat2ImportTap() throws {
         goTo("Clusters")
         dwell(Beat.read)
+        tap("Import kubeconfig")
+        dwell(2.0)
+        // Dismiss it before the test ends. A modal left open belongs to another
+        // process, and the harness waits on teardown that never comes.
+        let files = XCUIApplication(bundleIdentifier: "com.apple.DocumentsApp")
+        for candidate in [files.buttons["Cancel"], app.buttons["Cancel"]] where candidate.exists {
+            candidate.tap()
+            break
+        }
+        dwell(1.0)
+    }
+
+    /// The other half: a cluster that has just been imported and probed.
+    func beat2ImportResult() throws {
+        goTo("Clusters")
+        dwell(Beat.settle)
     }
 
     func beat3Overview() throws {
@@ -112,7 +139,15 @@ final class DemoDrive: XCTestCase {
     }
 
     func beat8NICo() throws {
+        goTo("Clusters")
+        dwell(Beat.read)
         goTo("NICo")
+        dwell(Beat.settle)
+    }
+
+    /// The closing shot: back to Overview, both clusters in.
+    func beat9Close() throws {
+        goTo("Overview")
         dwell(Beat.settle)
     }
 }

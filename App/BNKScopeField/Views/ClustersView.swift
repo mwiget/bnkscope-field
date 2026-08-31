@@ -97,8 +97,8 @@ private struct ClusterCard: View {
                 Spacer()
                 if cluster.tmmPods.contains(where: { $0.has(container: "tmm-stat-exporter") }) {
                     HStack(spacing: 6) {
-                        StatusDot(color: Theme.live, glow: true, size: 6)
-                        Text("streaming").font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Theme.live)
+                        StatusDot(color: Theme.ok, glow: true, size: 6)
+                        Text("streaming").font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Theme.ok)
                     }
                 }
             }

@@ -63,6 +63,15 @@ developer's Mac is their Xcode signing identity.
 | `PromText.swift` | the exposition format, gauges only |
 | `K8sTypes.swift` | the API objects the UI renders |
 
+## Colour
+
+Green means the data is flowing; red means it is not. That is the opposite of
+what the first version did — the logo's red was used for the live indicator,
+which put the healthiest state on screen in the same colour as STALLED
+(`#EF4444`) and every destructive button in the app. Broadcast convention says a
+live light is red; a monitoring convention says red is trouble, and this is a
+monitoring tool. The brand red now belongs to the mark and nothing else.
+
 ## The app
 
 `App/BNKScopeField.xcodeproj` — a SwiftUI iPad app on top of `BNKKit`. Open it in

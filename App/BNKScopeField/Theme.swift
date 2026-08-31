@@ -15,9 +15,17 @@ enum Theme {
     static let mutedBg   = Color(hex: 0x22252B)
 
     static let primary = Color(hex: 0x2563EB)
-    static let live    = Color(hex: 0xFF3355)
     static let ember   = Color(hex: 0xFF6A00)
     static let deep    = Color(hex: 0xE4002B)
+    /// The logo's red. It belongs to the mark, and to nothing else.
+    ///
+    /// It was the "streaming" colour until someone pointed out that a
+    /// troubleshooting tool showing its healthiest state in red is fighting
+    /// every other red on the screen — including STALLED, which at #EF4444 was
+    /// close enough to be mistaken for it at a glance. Broadcast convention says
+    /// a live indicator is red; a monitoring convention says red is trouble, and
+    /// in here the monitoring one wins.
+    static let brand   = Color(hex: 0xFF3355)
 
     static let ok      = Color(hex: 0x10B981)
     static let warn    = Color(hex: 0xF59E0B)
@@ -87,7 +95,7 @@ struct BNKMark: View {
             ctx.fill(Self.bezel, with: .color(Color(hex: 0x0A0C10)))
             ctx.clip(to: Self.bezel)
             ctx.stroke(Self.beam,
-                       with: .linearGradient(Gradient(colors: [Theme.live, Theme.live, Theme.ember]),
+                       with: .linearGradient(Gradient(colors: [Theme.brand, Theme.brand, Theme.ember]),
                                              startPoint: CGPoint(x: 12, y: 0), endPoint: CGPoint(x: 52, y: 0)),
                        style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
         }

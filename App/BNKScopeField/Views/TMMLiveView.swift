@@ -3,6 +3,7 @@ import BNKKit
 
 struct TMMLiveView: View {
     @Binding var columns: NavigationSplitViewVisibility
+    @State private var explainingMode = false
     @Environment(ClusterStore.self) private var store
     @Environment(TelemetryEngine.self) private var engine
 
@@ -40,7 +41,7 @@ struct TMMLiveView: View {
             // while the live pill is the one carrying state.
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 12) {
-                    Pill(text: "Direct", systemImage: "arrow.down.left.arrow.up.right", tone: .neutral)
+                    modeButton
                     statePill
                 }
                 statePill
@@ -48,6 +49,52 @@ struct TMMLiveView: View {
             .fixedSize()
         }
         .padding(.horizontal, 20).frame(height: 58)
+    }
+
+    /// Says where the numbers come from, and — unlike the label it replaces —
+    /// actually does something when tapped. A pill that looks exactly like the
+    /// interactive ones beside it and is inert is a small trap.
+    private var modeButton: some View {
+        Button { explainingMode = true } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.down.left.arrow.up.right")
+                    .font(.system(size: 12)).foregroundStyle(Theme.muted)
+                Text("Direct").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
+                Image(systemName: "info.circle")
+                    .font(.system(size: 11)).foregroundStyle(Theme.faint)
+            }
+            .padding(.horizontal, 12).frame(height: 32)
+            .background(Theme.secondary, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $explainingMode, arrowEdge: .top) { modeExplainer }
+    }
+
+    private var modeExplainer: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Direct").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.fg)
+                Text("Nothing is installed on the cluster. The iPad opens a port-forward to each f5-tmm pod through the apiserver, scrapes the exporter itself, and works out the rates here.")
+                    .font(.system(size: 13)).foregroundStyle(Theme.muted)
+            }
+            Divider().overlay(Theme.border)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text("Edge").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.fg)
+                    Badge(text: "not built yet", color: Theme.muted)
+                }
+                Text("Would run a small collector in its own namespace, so history survives the iPad sleeping and logs can be buffered cluster-side. One namespace to delete when you are done with it.")
+                    .font(.system(size: 13)).foregroundStyle(Theme.muted)
+            }
+            Divider().overlay(Theme.border)
+            Text("History here lasts as long as the app stays open — 30 minutes at most.")
+                .font(.system(size: 12)).foregroundStyle(Theme.faint)
+        }
+        .padding(18)
+        .frame(width: 360)
+        .background(Theme.card)
+        .presentationCompactAdaptation(.popover)
     }
 
     private var statePill: some View {
@@ -156,7 +203,7 @@ struct TMMLiveView: View {
             }
             ForEach(store.current?.tmmPods ?? [], id: \.metadata.name) { pod in
                 HStack(spacing: 12) {
-                    StatusDot(color: pod.has(container: "tmm-stat-exporter") ? Theme.live : Theme.warn,
+                    StatusDot(color: pod.has(container: "tmm-stat-exporter") ? Theme.ok : Theme.warn,
                               glow: pod.has(container: "tmm-stat-exporter"))
                     Text(pod.metadata.name)
                         .font(Theme.mono(12)).foregroundStyle(Theme.fg)
@@ -214,7 +261,7 @@ struct Pill: View {
 
     private var color: Color {
         switch tone {
-        case .live: return Theme.live
+        case .live: return Theme.ok
         case .bad:  return Theme.bad
         case .neutral: return Theme.muted
         }
@@ -223,7 +270,7 @@ struct Pill: View {
     var body: some View {
         HStack(spacing: 7) {
             if tone == .live {
-                StatusDot(color: Theme.live, glow: true)
+                StatusDot(color: Theme.ok, glow: true)
             } else if let systemImage {
                 Image(systemName: systemImage).font(.system(size: 12)).foregroundStyle(color)
             }

@@ -1,0 +1,1 @@
+This is bnkscope Field: an iPad app that talks to Kubernetes clusters directly. No server, no Docker, nothing in between. Everything you are about to see is a live lab.

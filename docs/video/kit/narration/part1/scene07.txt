@@ -1,0 +1,1 @@
+This is how traffic reaches TMM at all. The DPU service API wires interfaces into chains: the physical uplinks into HBN, and HBN into TMM's external and internal sides. Those last two are the same ports the hardware offload chart counts. So the wiring and the throughput are describing one path, from opposite ends.

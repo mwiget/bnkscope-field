@@ -146,6 +146,29 @@ case "hold":
     }
     await scraper.stop()
 
+case "logs":
+    guard args.count >= 3 else { die(usage) }
+    let client = try KubeClient(context: try loadContext(args[0], args[1]))
+    let ns = args[2]
+    let pods = try await client.pods(namespace: ns).prefix(6).map(\.metadata.name)
+    print("following \(pods.count) pods in \(ns)")
+    let deadline = Date().addingTimeInterval(12)
+    await withTaskGroup(of: Void.self) { group in
+        for pod in pods {
+            group.addTask {
+                do {
+                    for try await line in client.logStream(namespace: ns, pod: pod, tailLines: 3) {
+                        if Date() > deadline { break }
+                        let t = line.at.map { ISO8601DateFormatter().string(from: $0) } ?? "-"
+                        print("  [\(line.level.rawValue)] \(t) \(pad(line.pod, 34)) \(line.text.prefix(90))")
+                    }
+                } catch { print("  \(pod): \(error)") }
+            }
+        }
+        try? await Task.sleep(for: .seconds(12))
+        group.cancelAll()
+    }
+
 default:
     print(usage); exit(2)
 }

@@ -95,6 +95,21 @@ public enum K8s {
         }
 
         public func has(container name: String) -> Bool { container(named: name) != nil }
+
+        /// Every container whose log can be followed.
+        ///
+        /// The log endpoint refuses a pod with more than one container unless
+        /// told which, so a viewer that wants the whole pod has to ask for each
+        /// separately — an f5-tmm pod is eight streams, not one.
+        public var logSources: [String] {
+            let declared = (spec?.containers ?? []).map(\.name)
+            let attached = (spec?.ephemeralContainers ?? []).map(\.name)
+            return declared + attached
+        }
+    }
+
+    public struct Namespace: Decodable, Sendable {
+        public let metadata: ObjectMeta
     }
 
     public struct Node: Decodable, Sendable {
@@ -128,6 +143,11 @@ extension KubeClient {
 
     public func nodes() async throws -> [K8s.Node] {
         try await getJSON(K8s.List<K8s.Node>.self, "/api/v1/nodes").items
+    }
+
+    public func namespaces() async throws -> [String] {
+        try await getJSON(K8s.List<K8s.Namespace>.self, "/api/v1/namespaces")
+            .items.map(\.metadata.name).sorted()
     }
 
     public func pods(namespace: String? = nil, labelSelector: String? = nil) async throws -> [K8s.Pod] {

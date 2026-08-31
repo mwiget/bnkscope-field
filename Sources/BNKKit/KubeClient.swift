@@ -13,6 +13,12 @@ import Security
 public final class KubeClient: NSObject, Sendable {
     public let context: Kubeconfig.Context
     private let session: URLSession
+    /// A second session for anything that stays open.
+    ///
+    /// The request timeout that keeps a normal read from hanging forever would
+    /// also kill a followed log after thirty seconds, which is not a timeout so
+    /// much as a bug with a stopwatch.
+    let streamingSession: URLSession
     private let auth: Authenticator
 
     public init(context: Kubeconfig.Context, tag: String? = nil) throws {
@@ -32,6 +38,11 @@ public final class KubeClient: NSObject, Sendable {
         cfg.httpAdditionalHeaders = ["User-Agent": "bnkscope-field/0.1"]
         cfg.timeoutIntervalForRequest = 30
         self.session = URLSession(configuration: cfg, delegate: auth, delegateQueue: nil)
+        let streaming = URLSessionConfiguration.ephemeral
+        streaming.httpAdditionalHeaders = cfg.httpAdditionalHeaders
+        streaming.timeoutIntervalForRequest = .infinity
+        streaming.timeoutIntervalForResource = .infinity
+        self.streamingSession = URLSession(configuration: streaming, delegate: auth, delegateQueue: nil)
         super.init()
     }
 

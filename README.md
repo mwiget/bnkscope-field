@@ -183,6 +183,28 @@ window, and again to put it back. There is an expand button in each panel header
 too, because a gesture nobody can see is a feature nobody finds, and Escape
 closes it for anyone on a keyboard.
 
+### Logs
+
+Followed straight off the apiserver — a container's stdout is captured on the
+node and the kubelet streams it back, so nothing is installed for this. What is
+missing without a collector is history: the buffer holds what has arrived since
+you started following, and no more.
+
+Two things a log view needs that are easy to leave out:
+
+**Muting.** Following two dozen containers is only as useful as the noisiest one
+allows. On this cluster a single `sfc-controller` produced almost every line in
+the buffer and nothing else could be seen. Muting is display-only — the stream
+stays open and the lines stay held, so unmuting shows what was missed rather than
+starting over.
+
+**Level detection that knows these logs.** The first version handled klog,
+logfmt and JSON and scored a rabbitmq connection failure, a `"l"="critical"` and
+a Redis retry storm all as `info`, because F5's CWC logger spells the level
+`"l"="error"` — one letter. The heuristic in `Logs.swift` is tested against lines
+taken off the cluster rather than invented, including the reassuring cases a
+substring search turns into alarms (`0 errors`, `/var/log/failed/`).
+
 ### Known gaps
 
 - No app icon yet.

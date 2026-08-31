@@ -139,13 +139,11 @@ private struct Sidebar: View {
 
             Divider().overlay(Theme.border).padding(.horizontal, 16).padding(.top, 14)
 
-            HStack {
-                Text("CLUSTERS")
-                    .font(.system(size: 10.5, weight: .bold)).kerning(0.9)
-                    .foregroundStyle(Theme.muted)
-                Spacer()
-            }
-            .padding(.horizontal, 16).padding(.top, 15).padding(.bottom, 8)
+            // No "CLUSTERS" heading. There is already a Clusters entry in the
+            // navigation above, and one word doing two jobs — a screen you open
+            // and a list you pick from — read as the same thing listed twice.
+            // The rows sit under a divider and are self-evidently clusters.
+            Spacer().frame(height: 12)
 
             ScrollView {
                 VStack(spacing: 2) {

@@ -98,10 +98,14 @@ case "${1:-all}" in
   3) take beat3 beat3Overview tenant1.config ;;
   4) take beat4 beat4Logs tenant1.config ;;
   5) take beat5 beat5TMMLive tenant1.config ;;
+  # The install take ends on its confirmation sheet, which covers the thing the
+  # install was for. Re-running the same beat once the exporter is in skips the
+  # Add and lands on live charts.
+  5b) take beat5b beat5TMMLive tenant1.config ;;
   6) take beat6 beat6Terminal tenant1.config ;;
   7) take beat7 beat7DPUServices tenant1.config ;;
   8) take beat8 beat8NICo tenant1.config infra.config ;;
   9) take beat9 beat9Close tenant1.config infra.config ;;
-  all) for n in 1 2 3 4 5 6 7 8 9; do "$0" "$n"; done ;;
+  all) for n in 1 2 3 4 5 5b 6 7 8 9; do "$0" "$n"; done ;;
   *) echo "usage: $0 [1-9|all]"; exit 2 ;;
 esac

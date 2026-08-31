@@ -15,10 +15,18 @@ final class DemoDrive: XCTestCase {
     /// Long enough to read what changed, short enough not to bore. Tuned per
     /// beat rather than globally — waiting on a chart is not the same as
     /// waiting on a menu.
+    /// A take must outlast its narration, or the picture runs out before the
+    /// voice does. These are the scene durations plus slack for the launch, which
+    /// is trimmed off the head during assembly.
     enum Beat {
         static let glance: TimeInterval = 1.6
         static let read: TimeInterval = 3.0
         static let settle: TimeInterval = 6.0
+        /// scene03 is 31.0s, scene04 24.4s, scene06 26.6s, scene07 21.5s.
+        static let hold3: TimeInterval = 20.0
+        static let hold4: TimeInterval = 26.0
+        static let hold6: TimeInterval = 12.0
+        static let hold7: TimeInterval = 24.0
     }
 
     var app: XCUIApplication!
@@ -103,14 +111,15 @@ final class DemoDrive: XCTestCase {
         let finding = app.buttons.containing(NSPredicate(format: "label CONTAINS 'f5-dssm'")).firstMatch
         if finding.waitForExistence(timeout: 10) {
             finding.tap()
-            dwell(Beat.settle)
+            dwell(Beat.hold3)
             tap("Done")
+            dwell(Beat.read)
         }
     }
 
     func beat4Logs() throws {
         goTo("Logs")
-        dwell(Beat.settle)
+        dwell(Beat.hold4)
     }
 
     func beat5TMMLive() throws {
@@ -130,12 +139,12 @@ final class DemoDrive: XCTestCase {
         tap("ip -s link")
         dwell(Beat.settle)
         tap("connections")
-        dwell(Beat.settle)
+        dwell(Beat.hold6)
     }
 
     func beat7DPUServices() throws {
         goTo("DPU Services")
-        dwell(Beat.settle)
+        dwell(Beat.hold7)
     }
 
     func beat8NICo() throws {

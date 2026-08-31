@@ -72,9 +72,9 @@ final class DemoDrive: XCTestCase {
 
     // MARK: - Beats
 
-    /// The app with nothing in it.
+    /// The app with nothing in it. scene01 is 11.2s.
     func beat1Empty() throws {
-        dwell(Beat.settle)
+        dwell(18.0)
     }
 
     /// The empty app, and the tap that starts the import.
@@ -131,6 +131,10 @@ final class DemoDrive: XCTestCase {
             dwell(45)
             if app.buttons["Done"].exists { app.buttons["Done"].tap() }
             dwell(Beat.settle)
+        } else {
+            // Re-run with the exporter already in: this is the second half of
+            // scene05, the charts the install was for. It needs to last.
+            dwell(26.0)
         }
     }
 

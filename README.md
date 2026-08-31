@@ -225,8 +225,16 @@ no TTY there is nothing to tell it otherwise — it has no width flag and ignore
 characters on this cluster so nothing fits beside it, and those numbers are
 already a chart on TMM Live.
 
+### The icon
+
+`Tools/make-icon.swift` draws it from the same path data as
+`frontend-v2/public/icons/bnkscope-small.svg` in the bnkscope repository, so the
+app and the web UI carry one shape rather than two drawings of the same idea.
+Run it with `swift Tools/make-icon.swift <out.png>` and drop the result into the
+asset catalogue. It fills the square edge to edge — iOS masks its own corners,
+and drawing rounded ones underneath that gives a double rounding.
+
 ### Known gaps
 
-- No app icon yet.
 - Direct mode only. The in-cluster collector, logs and the pod terminal are not
   built.

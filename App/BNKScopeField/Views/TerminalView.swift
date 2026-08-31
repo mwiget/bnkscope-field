@@ -7,6 +7,7 @@ struct TerminalView: View {
     @Environment(ExecEngine.self) private var exec
 
     @State private var pod: K8s.Pod?
+    /// Only for a typed command; the quick ones use `toolContainer`.
     @State private var container = "debug"
     @State private var input = ""
     @FocusState private var inputFocused: Bool
@@ -37,6 +38,17 @@ struct TerminalView: View {
     // that produces a mangled table is worse than no button.
 
     private var pods: [K8s.Pod] { store.current?.tmmPods ?? [] }
+
+    /// Where the diagnostics live.
+    ///
+    /// `tmctl` is only in the debug container — running it in `f5-tmm` gives
+    /// "executable file not found in $PATH" — so the quick commands go there
+    /// whatever the picker says. The picker governs a typed command, which is
+    /// the only case where the container is the reader's choice to make.
+    private var toolContainer: String {
+        let available = pod?.logSources ?? []
+        return available.contains("debug") ? "debug" : (available.first ?? "debug")
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -87,22 +99,15 @@ struct TerminalView: View {
             }
             .menuStyle(.button).buttonStyle(.plain)
 
-            Menu {
-                ForEach(pod?.logSources ?? [], id: \.self) { name in
-                    Button(name) { container = name }
-                }
-            } label: {
-                chip(container, icon: "chevron.down")
-            }
-            .menuStyle(.button).buttonStyle(.plain)
-
             Divider().frame(height: 18).overlay(Theme.border)
 
             ForEach(Self.quick, id: \.0) { label, command in
-                Button { runCommand(command) } label: { chip(label) }
+                Button { runCommand(command, in: toolContainer) } label: { chip(label) }
                     .buttonStyle(.plain)
                     .disabled(exec.running)
             }
+            Text("in \(toolContainer)")
+                .font(Theme.mono(10.5)).foregroundStyle(Theme.faint)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 20).padding(.vertical, 11)
@@ -144,6 +149,14 @@ struct TerminalView: View {
 
     private var prompt: some View {
         HStack(spacing: 10) {
+            Menu {
+                ForEach(pod?.logSources ?? [], id: \.self) { name in
+                    Button(name) { container = name }
+                }
+            } label: {
+                chip(container, icon: "chevron.down")
+            }
+            .menuStyle(.button).buttonStyle(.plain)
             Text("$").font(Theme.mono(13, weight: .semibold)).foregroundStyle(Theme.ok)
             TextField("tmctl -d blade tmm_stat", text: $input)
                 .textFieldStyle(.plain)
@@ -168,10 +181,10 @@ struct TerminalView: View {
         let parts = input.split(separator: " ").map(String.init)
         guard !parts.isEmpty else { return }
         input = ""
-        runCommand(parts)
+        runCommand(parts, in: container)
     }
 
-    private func runCommand(_ command: [String]) {
+    private func runCommand(_ command: [String], in container: String) {
         guard let cluster = store.current, let pod,
               let namespace = pod.metadata.namespace,
               let client = try? cluster.client() else { return }

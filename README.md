@@ -5,6 +5,13 @@ An iPad and Mac front end for
 directly from the device. No Docker, no server, no bnkscope instance to point
 at.
 
+**Watch it** (unlisted — anyone with the link can view):
+**[bnkscope Field on macOS](https://youtu.be/3P-SYutL7P8)** (2:48) — three
+clusters imported from one kubeconfig, an exporter injected into a running TMM
+pod, live telemetry, commands in the debug and routing containers, and the log
+stream filtered. A live lab, not a mock-up, and recorded by a script rather than
+by hand: see [`docs/video/`](docs/video/).
+
 ## What it is
 
 Point it at a kubeconfig and it becomes a live view of a BNK cluster: TMM CPU,
@@ -196,6 +203,28 @@ wrong and are commented in `Identity.swift`: the key needs its
 the identity must be matched back by certificate bytes rather than by label — a
 label query returns whatever identity the keychain feels like, which on a
 developer's Mac is their Xcode signing identity.
+
+## The video
+
+[`docs/video/`](docs/video/) builds the walkthrough above, and nothing in it is
+performed by hand:
+
+| | |
+|---|---|
+| `record-macos.sh` | drives the real app with XCUITest and films one take per beat with `screencapture`, cropping to the window and normalising to 1080p |
+| `../App/BNKScopeFieldUITests/DemoDrive.swift` | the beats themselves — one test method each, so a fumbled one is re-shot on its own |
+| `make-slides.sh` | renders the title and close slides from F5's corporate template, on a host that has LibreOffice |
+| `build-video.sh` | cuts every take to the length of the narration line played over it, and assembles |
+| `narration/` | the script; the voice is synthesised from a reference clip on a GPU host |
+| `publish/youtube.yaml` | title, description and chapters |
+
+The template is deliberately not vendored: it is an internal F5 asset and this
+repo is public, so `make-slides.sh` reads it from a sibling checkout and removes
+it from the render host afterwards. `tools/card.swift` draws plain cards instead
+when it is not there.
+
+Re-recording is a command, not an afternoon, which is the point: a narration
+rewrite does not mean filming the app again.
 
 ## Layout
 

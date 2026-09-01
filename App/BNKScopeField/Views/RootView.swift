@@ -243,7 +243,7 @@ private struct ClusterRow: View {
         switch cluster.reach {
         case .reachable(let v, _, _): return "\(cluster.context.server.host() ?? "") · \(v)"
         case .unprobed:               return cluster.context.server.host() ?? ""
-        case .unreachable:            return "no route from this iPad"
+        case .unreachable:            return "no route from \(ManagedCluster.thisDevice)"
         case .unusable:               return "credentials iOS cannot use"
         }
     }

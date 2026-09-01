@@ -1,0 +1,1 @@
+The routing container is a different shell again. ZebOS has its own command line, and imish runs one command at a time — so here is the BGP summary, and the routes it has learned, from inside the pod.

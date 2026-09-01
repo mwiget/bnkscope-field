@@ -1,0 +1,1 @@
+Those three are one lab. Two BlueField-3 DPUs, each running BNK's control plane and TMM on the DPU itself, and an x86 cluster that provisions them and carries no tenant traffic of its own.

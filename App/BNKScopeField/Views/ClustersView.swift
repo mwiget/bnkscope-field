@@ -23,7 +23,7 @@ struct ClustersView: View {
                     }
                     if store.clusters.isEmpty {
                         Message(title: "No kubeconfigs yet",
-                                detail: "Import one from Files. Field needs a context with a client certificate or a bearer token — anything that shells out to aws, gcloud or kubelogin cannot be used on iOS.") {
+                                detail: "Import one \(ManagedCluster.importSource). Field needs a context with a client certificate or a bearer token — anything that shells out to aws, gcloud or kubelogin cannot be used here.") {
                             Button("Import kubeconfig") { importing = true }
                                 .buttonStyle(.borderedProminent)
                         }

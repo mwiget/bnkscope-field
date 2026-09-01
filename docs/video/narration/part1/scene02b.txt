@@ -1,0 +1,1 @@
+Field reads every one, turning each into a cluster of its own, with the client keys going straight to the keychain. There is no agent to install and no Prometheus anywhere: it talks to each apiserver directly.

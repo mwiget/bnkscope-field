@@ -1,0 +1,1 @@
+Then the charts fill. Field is scraping both TMM pods every two seconds, through the apiserver, and doing the counter arithmetic here on the Mac — which is the part Prometheus would normally be here to do.

@@ -36,10 +36,32 @@ final class DemoDrive: XCTestCase {
         // Landscape, set here rather than by pinning the app's supported
         // orientations: the recording should exercise the shipping build, not a
         // special one that cannot rotate.
+        // The Mac has no device orientation to set; its window geometry comes
+        // from the recorder instead.
+        #if os(iOS)
         XCUIDevice.shared.orientation = .landscapeLeft
+        #endif
         app = XCUIApplication()
-        app.launch()
-        dwell(1.0)
+        // Attach to an app that is already up rather than relaunching it.
+        //
+        // The recorder films one window by its CGWindowID, which it can only
+        // look up once that window exists — so the app is launched, positioned
+        // and measured before recording starts. A launch() here would replace
+        // that window with a new one and the take would film an id that no
+        // longer exists.
+        if app.state == .runningForeground || app.state == .runningBackground {
+            app.activate()
+        } else {
+            app.launch()
+        }
+        dwell(1.5)
+        // macOS gives the first click on an inactive window to activation and
+        // does not pass it through. Without a throwaway click here the first
+        // real one of every beat is silently lost — which looks exactly like a
+        // driver that found the wrong element.
+        let warmUp = app.buttons["Overview"]
+        if warmUp.waitForExistence(timeout: 20) { press(warmUp) }
+        dwell(0.6)
     }
 
     // MARK: - Helpers
@@ -52,13 +74,28 @@ final class DemoDrive: XCTestCase {
     @discardableResult
     func tap(_ label: String, in query: XCUIElementQuery? = nil,
              timeout: TimeInterval = 20, file: StaticString = #filePath, line: UInt = #line) -> Bool {
-        let element = (query ?? app.buttons)[label]
+        // .firstMatch, because a label is not unique: the Clusters screen
+        // offers "Import kubeconfig" both in its toolbar and in the middle of
+        // its empty state, and an ambiguous query throws rather than picking.
+        let element = (query ?? app.buttons)[label].firstMatch
         guard element.waitForExistence(timeout: timeout) else {
             XCTFail("never found \"\(label)\"", file: file, line: line)
             return false
         }
-        element.tap()
+        press(element)
         return true
+    }
+
+    /// The platforms disagree about the verb. `tap()` exists on macOS and
+    /// compiles, but does nothing — which is worse than not existing: the
+    /// element is found, no failure is raised, and the take films an app that
+    /// never moved. The whole first cut of the Mac beats was lost to it.
+    func press(_ element: XCUIElement) {
+        #if os(macOS)
+        element.click()
+        #else
+        element.tap()
+        #endif
     }
 
     func dwell(_ seconds: TimeInterval) {
@@ -70,111 +107,193 @@ final class DemoDrive: XCTestCase {
         dwell(Beat.glance)
     }
 
+    /// Not a beat: prints the element tree, which is the only reliable way to
+    /// learn what a SwiftUI view is on the other platform. Sidebar rows are
+    /// buttons on iPadOS and something else on macOS.
+    func dumpTree() throws {
+        dwell(3.0)
+        print("===TREE-START===")
+        print(app.debugDescription)
+        print("===TREE-END===")
+    }
+
+    // MARK: - Helpers for the Mac cut
+
+    /// Click a row in the cluster sidebar by the context name it shows.
+    ///
+    /// The row is a Button whose label is the whole card run together —
+    /// "dpu-cplane-tenant1, 192.168.68.200 · v1.34.0, BNK, DPU" — so it is
+    /// matched on its prefix. Looking for a StaticText of the bare name finds
+    /// nothing, silently leaves whatever cluster was selected last, and films
+    /// the right screen on the wrong cluster.
+    func selectCluster(_ name: String) {
+        let row = app.buttons
+            .matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
+        guard row.waitForExistence(timeout: 30) else {
+            XCTFail("no cluster row starting \"\(name)\"")
+            return
+        }
+        press(row)
+        dwell(Beat.glance)
+    }
+
+    /// Switch the Terminal's container picker.
+    ///
+    /// There are two menus on that row — the pod and the container — and they
+    /// are MenuButtons, not popUpButtons. Taking the first match picks the pod,
+    /// which changes nothing visible and leaves the debug tools on screen. This
+    /// one is found by the container it currently shows.
+    func pickContainer(from current: String, startingWith prefix: String) {
+        let picker = app.menuButtons
+            .matching(NSPredicate(format: "title == %@", current)).firstMatch
+        guard picker.waitForExistence(timeout: 20) else {
+            XCTFail("no container picker showing \"\(current)\"")
+            return
+        }
+        press(picker)
+        dwell(1.0)
+        let item = app.menuItems
+            .matching(NSPredicate(format: "title BEGINSWITH %@", prefix)).firstMatch
+        guard item.waitForExistence(timeout: 10) else {
+            XCTFail("no container starting \"\(prefix)\"")
+            return
+        }
+        press(item)
+        dwell(Beat.glance)
+    }
+
     // MARK: - Beats
 
-    /// The app with nothing in it. scene01 is 11.2s.
+    /// The app with nothing in it, before the import.
     func beat1Empty() throws {
-        dwell(18.0)
+        dwell(16.0)
     }
 
-    /// The empty app, and the tap that starts the import.
+    /// The import, end to end.
     ///
-    /// It stops at the tap. What opens next is the system document picker —
-    /// Apple's UI, in another process, showing nothing about this app — so the
-    /// cut lands on the cluster appearing instead. The import itself is real;
-    /// only the file-browsing is off camera.
-    func beat2ImportTap() throws {
+    /// On the Mac this is fully filmable, which it was not on the iPad: an
+    /// unsandboxed app runs NSOpenPanel in its own process, so the open dialog
+    /// is one of the app's own windows and the driver can type into it. Go-to-
+    /// folder takes the path directly rather than clicking through a file tree
+    /// that looks like nothing in particular on camera.
+    func beat2Import() throws {
+        // Short: the walk from Overview to Clusters is trimmed off the head of
+        // this take, and holding on the empty list afterwards only pushes the
+        // interesting part further from the cut point.
         goTo("Clusters")
-        dwell(Beat.read)
+        dwell(1.2)
         tap("Import kubeconfig")
-        dwell(2.0)
-        // Dismiss it before the test ends. A modal left open belongs to another
-        // process, and the harness waits on teardown that never comes.
-        let files = XCUIApplication(bundleIdentifier: "com.apple.DocumentsApp")
-        for candidate in [files.buttons["Cancel"], app.buttons["Cancel"]] where candidate.exists {
-            candidate.tap()
-            break
+        dwell(2.5)
+        // The panel opens on the home directory, where the file is, so this is a
+        // click rather than a typed path — and a viewer can see which file is
+        // being chosen, which a ⇧⌘G path they never see cannot show.
+        let sheet = app.sheets.firstMatch
+        guard sheet.waitForExistence(timeout: 20) else {
+            XCTFail("the open panel never appeared")
+            return
         }
-        // Rest on the empty Clusters screen. The next take is the same screen
-        // with a cluster in it, and the two are crossfaded — so this take has to
-        // end somewhere the other one can be dissolved into.
-        dwell(10.0)
+        let file = sheet.textFields
+            .matching(NSPredicate(format: "value == %@", "config-multi.txt")).firstMatch
+        guard file.waitForExistence(timeout: 10) else {
+            XCTFail("config-multi.txt is not in the panel's list")
+            return
+        }
+        press(file)
+        // Held, so the take has slack around the panel rather than closing it
+        // the instant the row highlights. The privacy mask over the file list
+        // is a time window, and a window with no margin either clips the panel
+        // or bleeds onto the cluster list that replaces it.
+        dwell(4.0)
+        let open = sheet.buttons["Open"]
+        if open.exists { press(open) } else { app.typeKey(.return, modifierFlags: []) }
+        // Three contexts read, three keys into the keychain, three probes. The
+        // beat is the rows appearing and going green.
+        dwell(24.0)
     }
 
-    /// The other half: a cluster that has just been imported and probed.
-    func beat2ImportResult() throws {
+    /// Three clusters, probed. Health is the point, so it rests on the list.
+    func beat3Clusters() throws {
         goTo("Clusters")
-        dwell(Beat.settle)
+        dwell(24.0)
     }
 
-    /// Overview alone.
-    ///
-    /// Split from the tap because the narration spends twenty-odd seconds on
-    /// what Overview is before it mentions the pod — and in one take the sheet
-    /// opened as soon as the finding rendered, so the voice was still explaining
-    /// the ranking while the screen had moved on.
-    func beat3Overview() throws {
+    /// What the clusters actually are: Overview ranks what is wrong, Resources
+    /// is the read-only browser.
+    func beat4Explore() throws {
+        selectCluster("dpu-cplane-tenant1")
         goTo("Overview")
+        dwell(20.0)
+        goTo("Resources")
+        dwell(16.0)
+    }
+
+    /// Installing the exporter, and the charts it feeds.
+    ///
+    /// Written to work whether or not the exporter is already in: with it
+    /// missing this films the install, with it present the charts. The install
+    /// is the slow half — the image has to be pulled — and that wait is what
+    /// gets cut.
+    func beat5TMMLive() throws {
+        selectCluster("dpu-cplane-tenant1")
+        goTo("TMM Live")
+        dwell(Beat.read)
+        if app.buttons["Add the exporter"].waitForExistence(timeout: 6) {
+            press(app.buttons["Add the exporter"])
+            dwell(50.0)
+            if app.buttons["Done"].exists { press(app.buttons["Done"]) }
+        }
         dwell(26.0)
     }
 
-    /// Opening the pod, and what it says. The second half of scene03.
-    func beat3Finding() throws {
-        goTo("Overview")
-        dwell(2.0)
-        let finding = app.buttons.containing(NSPredicate(format: "label CONTAINS 'f5-dssm'")).firstMatch
-        guard finding.waitForExistence(timeout: 20) else {
-            XCTFail("no f5-dssm finding on Overview")
-            return
-        }
-        finding.tap()
-        dwell(14.0)
-    }
-
-    func beat4Logs() throws {
-        goTo("Logs")
-        dwell(Beat.hold4)
-    }
-
-    func beat5TMMLive() throws {
-        goTo("TMM Live")
-        dwell(Beat.read)
-        if app.buttons["Add the exporter"].waitForExistence(timeout: 5) {
-            app.buttons["Add the exporter"].tap()
-            // The image pull is the slow part; this wait is what gets cut.
-            dwell(45)
-            if app.buttons["Done"].exists { app.buttons["Done"].tap() }
-            dwell(Beat.settle)
-        } else {
-            // Re-run with the exporter already in: this is the second half of
-            // scene05, the charts the install was for. It needs to last.
-            dwell(26.0)
-        }
-    }
-
-    func beat6Terminal() throws {
+    /// A command in the debug container.
+    func beat6TerminalDebug() throws {
+        selectCluster("dpu-cplane-tenant1")
         goTo("Terminal")
-        tap("ip -s link")
-        dwell(Beat.settle)
+        dwell(Beat.read)
         tap("connections")
+        dwell(8.0)
+        tap("interfaces")
         dwell(Beat.hold6)
     }
 
-    func beat7DPUServices() throws {
-        goTo("DPU Services")
-        dwell(Beat.hold7)
-    }
-
-    func beat8NICo() throws {
-        goTo("Clusters")
+    /// The routing container, and BGP from ZebOS's own shell.
+    func beat7TerminalRouting() throws {
+        selectCluster("dpu-cplane-tenant1")
+        goTo("Terminal")
         dwell(Beat.read)
-        goTo("NICo")
-        dwell(Beat.settle)
+        pickContainer(from: "debug", startingWith: "f5-tmm-routing")
+        dwell(2.0)
+        tap("bgp summary")
+        // Long enough to read the summary, short enough that the second command
+        // still lands inside the take. At 14s it did not, and the cut promised
+        // routes the picture never showed.
+        dwell(9.0)
+        tap("routes")
+        dwell(12.0)
     }
 
-    /// The closing shot: back to Overview, both clusters in.
+    /// Logs, then the same logs filtered.
+    func beat8Logs() throws {
+        selectCluster("dpu-cplane-tenant1")
+        goTo("Logs")
+        dwell(12.0)
+        let search = app.searchFields.firstMatch.exists
+            ? app.searchFields.firstMatch : app.textFields["Search"]
+        if search.waitForExistence(timeout: 10) {
+            press(search)
+            // A term that actually occurs. "bgp" narrowed 2436 held lines to
+            // none, which is a truthful screen and a useless demonstration:
+            // the point is watching the stream narrow, not watching it empty.
+            app.typeText("tmm")
+            dwell(14.0)
+        } else {
+            XCTFail("no log search field")
+        }
+    }
+
+    /// The closing shot: back to the cluster list, all three in.
     func beat9Close() throws {
-        goTo("Overview")
+        goTo("Clusters")
         dwell(Beat.settle)
     }
 }

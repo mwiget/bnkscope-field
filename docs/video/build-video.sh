@@ -33,7 +33,7 @@ wav_len() { python3 -c "import wave;w=wave.open('$1');print(round(w.getnframes()
 # where the app is launching or the screen has not settled yet.
 sequence() {
     cat <<'SEQ'
-card|bnkscope Field|scene01|
+card|bnkscope Field~on macOS|scene01|
 video|beat2Import|scene02|6
 video|beat3Clusters|scene03|5
 video|beat4Explore|scene04|4
@@ -43,18 +43,20 @@ video|beat5TMMLive|scene07|62
 video|beat6TerminalDebug|scene08|5
 video|beat7TerminalRouting|scene09|6
 video|beat8Logs|scene10|4
-card|github.com/mwiget/bnkscope-field|scene11|
+card|bnkscope Field~github.com/mwiget/bnkscope-field|scene11|
 SEQ
 }
 
 # A card: the app's own background and type, so it does not look like a
-# different product's title sequence.
+# different product's title sequence. Rendered by tools/card.swift rather than
+# ffmpeg — Homebrew builds ffmpeg without libfreetype, so drawtext is absent.
 make_card() {
-    local text="$1" seconds="$2" out="$3"
-    local escaped=${text//:/\\:}
-    ffmpeg -nostdin -y -f lavfi -i "color=c=0x0B0D12:s=1920x1080:r=30" -t "$seconds" \
-        -vf "drawtext=fontfile=$FONT:text='$escaped':fontcolor=0xE8EAED:fontsize=64:x=(w-tw)/2:y=(h-th)/2" \
-        -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p "$out" >/dev/null 2>&1
+    local text="$1" sub="$2" seconds="$3" out="$4"
+    local png="$WORK/card$$.png"
+    "$HERE/build/card" "$png" "$text" "$sub"
+    ffmpeg -nostdin -y -loop 1 -i "$png" -t "$seconds" -r 30 \
+        -c:v libx264 -preset medium -crf 19 -pix_fmt yuv420p "$out" >/dev/null 2>&1
+    rm -f "$png"
 }
 
 # One visual segment, cut to exactly `target` seconds.
@@ -68,14 +70,14 @@ make_video() {
     usable=$(python3 -c "print(max(0.5, $have - $head))")
     if python3 -c "exit(0 if $usable >= $target else 1)"; then
         ffmpeg -nostdin -y -ss "$head" -t "$target" -i "$src" \
-            -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -an "$out" >/dev/null 2>&1
+            -c:v libx264 -preset medium -crf 19 -pix_fmt yuv420p -an "$out" >/dev/null 2>&1
     else
         # Short: play what there is, then hold the last frame for the remainder.
         local pad
         pad=$(python3 -c "print(round($target - $usable, 3))")
         ffmpeg -nostdin -y -ss "$head" -i "$src" \
             -vf "tpad=stop_mode=clone:stop_duration=$pad" -t "$target" \
-            -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -an "$out" >/dev/null 2>&1
+            -c:v libx264 -preset medium -crf 19 -pix_fmt yuv420p -an "$out" >/dev/null 2>&1
     fi
 }
 
@@ -92,17 +94,35 @@ while IFS='|' read -r kind source scene head; do
     target=$(python3 -c "print(round($len + $lead + $GAP, 3))")
 
     case "$kind" in
-        card)  make_card "$source" "$target" "$seg" ;;
+        card)  make_card "${source%%~*}" "${source#*~}" "$target" "$seg" ;;
         video) make_video "$source" "${head:-0}" "$target" "$seg" ;;
     esac
     echo "file '$seg'" >> "$WORK/list.txt"
 
     # The audio for this segment: lead silence, the line, then gap silence, so
-    # picture and voice stay locked without a global offset to drift.
-    ffmpeg -nostdin -y -f lavfi -t "$lead" -i anullsrc=r=24000:cl=mono \
-        -i "$VO/$scene.wav" -f lavfi -t "$GAP" -i anullsrc=r=24000:cl=mono \
-        -filter_complex "[0][1][2]concat=n=3:v=0:a=1[a]" -map "[a]" \
-        -c:a pcm_s16le "$WORK/a$i.wav" >/dev/null 2>&1
+    # picture and voice stay locked without a global offset that could drift.
+    #
+    # A zero-length silence is left out rather than passed as -t 0: anullsrc is
+    # an infinite source, and -t 0 does not bound it — ffmpeg sits there
+    # generating silence until it is killed. Every beat after the first has no
+    # lead, so this hung the build on segment two.
+    apad_lead=""; amap="[1]"
+    if python3 -c "exit(0 if $lead > 0 else 1)"; then
+        apad_lead="-f lavfi -t $lead -i anullsrc=r=24000:cl=mono"
+    fi
+    # shellcheck disable=SC2086
+    if [ -n "$apad_lead" ]; then
+        ffmpeg -nostdin -y $apad_lead -i "$VO/$scene.wav" \
+            -f lavfi -t "$GAP" -i anullsrc=r=24000:cl=mono \
+            -filter_complex "[0][1][2]concat=n=3:v=0:a=1[a]" -map "[a]" \
+            -c:a pcm_s16le "$WORK/a$i.wav" >/dev/null 2>&1
+    else
+        ffmpeg -nostdin -y -i "$VO/$scene.wav" \
+            -f lavfi -t "$GAP" -i anullsrc=r=24000:cl=mono \
+            -filter_complex "[0][1]concat=n=2:v=0:a=1[a]" -map "[a]" \
+            -c:a pcm_s16le "$WORK/a$i.wav" >/dev/null 2>&1
+    fi
+    unset amap
     echo "file '$WORK/a$i.wav'" >> "$WORK/audio.txt"
     printf "  %-22s %-8s %6.2fs\n" "$source" "$scene" "$target"
 done <<< "$(sequence)"

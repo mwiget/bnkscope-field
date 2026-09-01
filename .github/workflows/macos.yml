@@ -1,0 +1,90 @@
+# Builds the Mac app on every merge to main and attaches it to a GitHub release,
+# so there is always a current download without anyone opening Xcode.
+#
+# Cost note: macOS runners bill at ten times the Linux rate and this repository
+# is private, so a run that takes a few minutes of wall clock counts as tens of
+# minutes against the quota. That is why there is no build on pull requests —
+# worth adding if it turns out to be wanted.
+name: macOS app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write          # to create the release and upload the app to it
+
+concurrency:
+  group: macos-release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The newest Xcode the runner has, rather than its default, which lags.
+      # Verified against Xcode 26.6 / macOS 26.5 SDK; the app needs nothing
+      # newer, since it deploys back to macOS 15.
+      - name: Use the newest Xcode on the runner
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          xcodebuild -version
+          swift --version
+
+      - name: Test
+        run: swift test
+
+      - name: Build
+        run: |
+          xcodebuild \
+            -project App/BNKScopeField.xcodeproj \
+            -scheme BNKScopeField \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath build \
+            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      # Ad-hoc, because there is no Developer ID certificate to sign with yet.
+      # That is enough for macOS to run the app; it is not enough for Gatekeeper
+      # to let it run unprompted, which is what the release notes explain. Doing
+      # it properly needs a Developer ID Application certificate in a throwaway
+      # keychain, `--options runtime --timestamp`, then notarytool and stapler.
+      # None of that is written here because none of it can be tested until the
+      # certificate exists.
+      - name: Sign
+        run: |
+          APP="build/Build/Products/Release/bnkscope Field.app"
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --strict --deep "$APP"
+
+      - name: Check what was built
+        run: |
+          APP="build/Build/Products/Release/bnkscope Field.app"
+          lipo -archs "$APP/Contents/MacOS/bnkscope Field"
+          test -f "$APP/Contents/Resources/AppIcon.icns"
+          python3 Tools/check-icns.py "$APP/Contents/Resources/AppIcon.icns"
+
+      - name: Package
+        id: package
+        run: |
+          VERSION=$(grep -m1 -o 'MARKETING_VERSION = [^;]*' \
+            App/BNKScopeField.xcodeproj/project.pbxproj | awk '{print $3}')
+          echo "tag=v${VERSION}-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "build/Build/Products/Release/bnkscope Field.app" \
+            bnkscope-Field-macOS.zip
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.package.outputs.tag }}" \
+            bnkscope-Field-macOS.zip \
+            --title "bnkscope Field for macOS — ${{ steps.package.outputs.tag }}" \
+            --target "$GITHUB_SHA" \
+            --notes-file .github/release-notes-macos.md

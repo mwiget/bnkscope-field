@@ -37,10 +37,19 @@ public actor PodScraper {
     public func scrape(path: String = "/metrics") async throws -> [Sample] {
         do {
             return try await attempt(path)
-        } catch is PortForward.Failure {
+        } catch let first as PortForward.Failure {
+            Log.telemetry.notice("\(self.pod, privacy: .public): \(first.description, privacy: .public); rebuilding the tunnel")
             await discard()
             reconnects += 1
-            return try await attempt(path)
+            do {
+                return try await attempt(path)
+            } catch {
+                Log.telemetry.error("\(self.pod, privacy: .public): retry failed: \(String(describing: error), privacy: .public)")
+                throw error
+            }
+        } catch {
+            Log.telemetry.error("\(self.pod, privacy: .public): scrape failed: \(String(describing: error), privacy: .public)")
+            throw error
         }
     }
 
@@ -59,6 +68,7 @@ public actor PodScraper {
 
     private func open() async throws -> PortForward {
         if let tunnel, await tunnel.isUsable { return tunnel }
+        Log.telemetry.notice("\(self.pod, privacy: .public): opening a tunnel to :\(self.port, privacy: .public)")
         let fresh = try client.portForward(namespace: namespace, pod: pod, port: port)
         await fresh.connect()
         tunnel = fresh

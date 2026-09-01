@@ -41,8 +41,13 @@ jobs:
           xcodebuild -version
           swift --version
 
+      # Both configurations: the release build is what ships, and it has
+      # already been bitten once by an optimiser bug (Swift 6.4 miscompiled a
+      # task-group loop) that no Debug run could see.
       - name: Test
-        run: swift test
+        run: |
+          swift test
+          swift test -c release
 
       - name: Build
         run: |

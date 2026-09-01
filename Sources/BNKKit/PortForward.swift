@@ -21,12 +21,14 @@ public actor PortForward {
     public enum Failure: Error, CustomStringConvertible {
         case remote(String)
         case closed
+        case transport(String)
         case malformed(String)
 
         public var description: String {
             switch self {
             case .remote(let m):    return "port-forward refused: \(m)"
             case .closed:           return "the tunnel closed before the reply was complete"
+            case .transport(let m): return "the tunnel failed: \(m)"
             case .malformed(let m): return "the reply could not be read: \(m)"
             }
         }
@@ -38,6 +40,10 @@ public actor PortForward {
     private var atEnd = false
     private var buffer = Data()
     private var remoteError = ""
+    /// Why the socket stopped, if it stopped with an error. Until this was kept
+    /// a Local Network denial, a TLS client-certificate failure and a reply that
+    /// genuinely ended early all reported the same "closed before complete".
+    private var lastError: Error?
 
     init(task: URLSessionWebSocketTask, port: Int) {
         self.task = task
@@ -65,7 +71,12 @@ public actor PortForward {
         while true {
             if atEnd { return false }
             let message: URLSessionWebSocketTask.Message
-            do { message = try await task.receive() } catch { atEnd = true; return false }
+            do { message = try await task.receive() } catch {
+                Log.tunnel.error("receive failed on :\(self.port, privacy: .public): \(String(describing: error), privacy: .public)")
+                lastError = error
+                atEnd = true
+                return false
+            }
             guard case .data(let frame) = message, let channel = frame.first else { continue }
             let payload = frame.dropFirst()
             switch channel {
@@ -114,7 +125,17 @@ public actor PortForward {
     }
 
     private func failure() -> Failure {
-        remoteError.isEmpty ? .closed : .remote(remoteError)
+        if !remoteError.isEmpty { return .remote(remoteError) }
+        if let lastError { return .transport(Self.describe(lastError)) }
+        return .closed
+    }
+
+    /// `NSError` descriptions carry the domain and code, which is what
+    /// distinguishes the cases that matter here; the localized text alone
+    /// often does not.
+    private static func describe(_ error: Error) -> String {
+        let ns = error as NSError
+        return "\(ns.localizedDescription) [\(ns.domain) \(ns.code)]"
     }
 
     // MARK: - HTTP
@@ -138,7 +159,12 @@ public actor PortForward {
         head += "\r\n"
         var framed = Data([0])
         framed.append(Data(head.utf8))
-        do { try await task.send(.data(framed)) } catch { atEnd = true; throw failure() }
+        do { try await task.send(.data(framed)) } catch {
+            Log.tunnel.error("send failed on :\(self.port, privacy: .public): \(String(describing: error), privacy: .public)")
+            lastError = error
+            atEnd = true
+            throw failure()
+        }
 
         let statusLine = try await takeLine()
         let parts = statusLine.split(separator: " ", maxSplits: 2).map(String.init)

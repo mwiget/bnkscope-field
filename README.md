@@ -50,6 +50,14 @@ restarts. A denial arrives as `NSURLErrorNotConnectedToInternet`, the same code
 a genuinely offline device reports, so the app tells the two apart by whether
 the address is one only the local network can reach.
 
+On macOS the grant is recorded against the binary that asked. **After updating
+the app**, the switch in System Settings → Privacy & Security → Local Network
+stays on but no longer applies to the new binary, and macOS denies silently
+rather than asking again — every cluster shows as unreachable with the
+Local Network message. Switch bnkscope Field **off and on again** there and it
+is re-recorded. One row may appear per location the app has run from; toggling
+any of them toggles all, they are one entry.
+
 ## How it works
 
 Import one or more kubeconfigs — a multi-context `~/.kube/config` is split into

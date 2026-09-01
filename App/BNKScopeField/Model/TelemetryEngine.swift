@@ -127,10 +127,17 @@ final class TelemetryEngine {
         let bySeries: [String: Double]
     }
 
+    /// One pod's scrape result. See `scrapeOnce` for why this is not a tuple.
+    private struct Outcome: Sendable {
+        let pod: String
+        let result: Result<[Sample], Error>
+    }
+
     // MARK: - Lifecycle
 
     func start(client: KubeClient, namespace: String, pods: [String]) {
         stop()
+        Log.telemetry.notice("start: \(pods.count) pods in \(namespace, privacy: .public): \(pods.joined(separator: ", "), privacy: .public)")
         self.client = client
         self.namespace = namespace
         self.targets = pods
@@ -150,6 +157,7 @@ final class TelemetryEngine {
     /// cluster-side to throttle — the iPad simply stops asking, and the history
     /// it already holds is still there when it comes back.
     func pause() {
+        Log.telemetry.notice("pause requested in state \(String(describing: self.state), privacy: .public)")
         guard state == .live else { return }
         task?.cancel()
         task = nil
@@ -168,6 +176,7 @@ final class TelemetryEngine {
     }
 
     func resume() {
+        Log.telemetry.notice("resume requested in state \(String(describing: self.state), privacy: .public)")
         guard state == .paused, let client else { return }
         state = .live
         // The gap is real and the next rate must not be computed across it: a
@@ -187,6 +196,7 @@ final class TelemetryEngine {
     /// Restarting the engine would pick that up, but `stop()` clears every panel
     /// — half an hour of graphs thrown away because one pod of three changed.
     func retarget(to pods: [String]) {
+        Log.telemetry.notice("retarget to \(pods.count) pods (running: \(self.task != nil))")
         guard let client, task != nil else { return }
         let wanted = Set(pods)
         guard wanted != Set(targets) else { return }
@@ -215,6 +225,7 @@ final class TelemetryEngine {
     var isRunning: Bool { task != nil }
 
     func stop() {
+        Log.telemetry.notice("stop (was \(String(describing: self.state), privacy: .public), \(self.scrapers.count) scrapers)")
         task?.cancel()
         task = nil
         state = .idle
@@ -245,20 +256,32 @@ final class TelemetryEngine {
     private func scrapeOnce() async {
         guard client != nil else { return }
         let active = scrapers
+        if active.isEmpty {
+            Log.telemetry.error("scrape round with no scrapers (state \(String(describing: self.state), privacy: .public), streak \(self.failureStreak))")
+        }
 
         var frames: [String: [Sample]] = [:]
         var failures: [String] = []
         // Pods are scraped concurrently: two tunnels read in sequence would put
         // the samples a round-trip apart and skew every per-pod comparison.
-        await withTaskGroup(of: (String, Result<[Sample], Error>).self) { group in
+        //
+        // The child result is a struct, not a tuple, on purpose. With the element
+        // type `(String, Result<[Sample], Error>)` the Swift 6.4 optimiser
+        // miscompiles this loop: under -O the group yields nothing at all — no
+        // success, no failure — so every Release build stalled with "every
+        // scrape failed" while Debug builds, and the iPad, worked. Reproduced in
+        // isolation with swiftc -O; a struct element is the narrowest change
+        // that survives it.
+        await withTaskGroup(of: Outcome.self) { group in
             for (pod, scraper) in active {
                 group.addTask {
-                    do { return (pod, .success(try await scraper.scrape())) }
-                    catch { return (pod, .failure(error)) }
+                    do { return Outcome(pod: pod, result: .success(try await scraper.scrape())) }
+                    catch { return Outcome(pod: pod, result: .failure(error)) }
                 }
             }
-            for await (pod, result) in group {
-                switch result {
+            for await outcome in group {
+                let pod = outcome.pod
+                switch outcome.result {
                 case .success(let s):
                     frames[pod] = s
                     podStatus[pod] = .answering(samples: s.count)
@@ -269,15 +292,20 @@ final class TelemetryEngine {
             }
         }
 
+        Log.telemetry.notice("round: \(frames.count) answered, \(failures.count) failed of \(active.count); state \(String(describing: self.state), privacy: .public)")
         guard !frames.isEmpty else {
             failureStreak += 1
             if failureStreak >= Self.failuresBeforeGivingUp {
+                Log.telemetry.error("giving up after \(self.failureStreak) empty rounds: \(failures.first ?? "no scrapers", privacy: .public)")
                 state = .failed(failures.first ?? "every scrape failed")
             }
             return
         }
         failureStreak = 0
-        if state != .live { state = .live }
+        if state != .live {
+            Log.telemetry.notice("back to live from \(String(describing: self.state), privacy: .public)")
+            state = .live
+        }
         let now = Date()
         if let previousScrape = lastScrape {
             let gap = now.timeIntervalSince(previousScrape)

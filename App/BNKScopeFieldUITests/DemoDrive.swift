@@ -36,9 +36,24 @@ final class DemoDrive: XCTestCase {
         // Landscape, set here rather than by pinning the app's supported
         // orientations: the recording should exercise the shipping build, not a
         // special one that cannot rotate.
+        // The Mac has no device orientation to set; its window geometry comes
+        // from the recorder instead.
+        #if os(iOS)
         XCUIDevice.shared.orientation = .landscapeLeft
+        #endif
         app = XCUIApplication()
-        app.launch()
+        // Attach to an app that is already up rather than relaunching it.
+        //
+        // The recorder films one window by its CGWindowID, which it can only
+        // look up once that window exists — so the app is launched, positioned
+        // and measured before recording starts. A launch() here would replace
+        // that window with a new one and the take would film an id that no
+        // longer exists.
+        if app.state == .runningForeground || app.state == .runningBackground {
+            app.activate()
+        } else {
+            app.launch()
+        }
         dwell(1.0)
     }
 

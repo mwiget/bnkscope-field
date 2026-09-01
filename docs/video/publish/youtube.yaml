@@ -1,0 +1,56 @@
+title: "bnkscope Field on macOS: Kubernetes and F5 TMM telemetry, no agent"
+privacy: unlisted
+# Set by the upload. Only --thumbnail-only uses it: videos.insert is the sole
+# call there is, so a corrected cut is a new video and a new URL, never a
+# replacement of this one.
+video_id: 3P-SYutL7P8
+thumbnail_at: 88.0
+# Relative to the tmm-lb-nico kit, which is where upload-youtube.py lives and
+# what it resolves paths against. Sibling checkouts, the same assumption
+# make-slides.sh makes.
+video: ../../../../bnkscope-field/docs/video/build/bnkscope-field-macos.mp4
+tags:
+  - Kubernetes
+  - F5
+  - BIG-IP Next for Kubernetes
+  - BNK
+  - DPU
+  - BlueField
+  - observability
+  - macOS
+  - SwiftUI
+description: |
+  bnkscope Field is a native macOS and iPadOS app that talks to Kubernetes
+  clusters over their own apiserver. There is no agent to install in the
+  cluster, no Prometheus, and no port forward held open from a laptop — every
+  screen here is built from plain apiserver calls, and the telemetry is scraped
+  and differenced on the Mac itself.
+
+  This is a live lab, recorded end to end: three clusters imported from one
+  multi-context kubeconfig, an exporter injected into a running F5 TMM pod as an
+  ephemeral container, live TMM statistics at a two-second cadence, commands run
+  inside the pod's debug and routing containers, and the log stream filtered.
+
+  Nothing is staged. The faults on screen are the ones the lab actually had —
+  two pods running but not ready, a readiness probe timing out, and no exporter
+  yet on either TMM pod.
+
+  Chapters:
+  00:00 What it is
+  00:05 Importing a kubeconfig
+  00:26 Three clusters, probed
+  00:41 The lab behind them
+  00:54 Overview: what is wrong, ranked
+  01:14 Resources
+  01:27 Installing the exporter
+  01:43 TMM Live
+  01:58 Terminal: the debug container
+  02:10 Terminal: BGP from the routing container
+  02:24 Logs, filtered
+  02:38 Close
+
+  Source and a notarized macOS download:
+  https://github.com/mwiget/bnkscope-field
+
+  The recording itself is reproducible: docs/video/record-macos.sh drives the
+  real app with XCUITest and films it, so no part of this was performed by hand.

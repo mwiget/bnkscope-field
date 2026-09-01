@@ -279,3 +279,42 @@ struct LocalAddressTests {
         #expect(!Net.isLocal(host: "999.1.1.1"))       // not an address
     }
 }
+
+@Suite("Command lines")
+struct ArgvTests {
+
+    @Test("plain commands split on whitespace")
+    func plain() {
+        #expect(Argv.split("tmctl -d blade tmm_stat") == ["tmctl", "-d", "blade", "tmm_stat"])
+        #expect(Argv.split("  ip   -s  link  ") == ["ip", "-s", "link"])
+        #expect(Argv.split("") == [])
+    }
+
+    @Test("imish needs one argument to hold a whole ZebOS command")
+    func quoted() {
+        // The reason quoting exists here at all: without it this is six
+        // arguments and imish is handed nonsense.
+        #expect(Argv.split(#"imish -e en -e "show ip bgp summary""#)
+                == ["imish", "-e", "en", "-e", "show ip bgp summary"])
+        #expect(Argv.split("imish -e 'show ip route bgp'") == ["imish", "-e", "show ip route bgp"])
+    }
+
+    @Test("quotes and backslashes behave as a shell would")
+    func escapes() {
+        #expect(Argv.split(#"a "b c" d"#) == ["a", "b c", "d"])
+        #expect(Argv.split(#"one\ two"#) == ["one two"])
+        #expect(Argv.split(#"'a\b'"#) == [#"a\b"#])          // literal inside single quotes
+        #expect(Argv.split(#""" x"#) == ["", "x"])            // an empty argument
+        #expect(Argv.split(#""unterminated"#) == ["unterminated"])
+    }
+
+    @Test("joining is what splitting undoes")
+    func roundTrip() {
+        for line in [["imish", "-e", "en", "-e", "show ip bgp summary"],
+                     ["tmctl", "-d", "blade", "tmm_stat"],
+                     ["echo", "a b", "c"],
+                     ["weird", #"quote"inside"#]] {
+            #expect(Argv.split(Argv.join(line)) == line)
+        }
+    }
+}

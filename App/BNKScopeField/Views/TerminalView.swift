@@ -7,6 +7,7 @@ struct TerminalView: View {
     @Environment(ExecEngine.self) private var exec
 
     @State private var pod: K8s.Pod?
+    @State private var container: String?
     @State private var input = ""
     @FocusState private var inputFocused: Bool
 
@@ -18,7 +19,7 @@ struct TerminalView: View {
     /// with no TTY there is nothing to tell it otherwise: it has no width flag
     /// and ignores COLUMNS. Fewer columns that read as one table beat more
     /// columns split across two.
-    private static let quick: [(String, [String])] = [
+    private static let debugTools: [(String, [String])] = [
         ("cpu", ["tmctl", "-d", "blade", "tmm_stat", "-s", "pid,cpu,polls,idle_polls"]),
         ("connections", ["tmctl", "-d", "blade", "tmm_stat",
                          "-s", "client_side_traffic.cur_conns,client_side_traffic.tot_conns"]),
@@ -30,6 +31,32 @@ struct TerminalView: View {
         ("ip -s link", ["ip", "-s", "link"]),
     ]
 
+    /// The same idea for the routing container, where ZebOS lives.
+    ///
+    /// `imish` is an interactive shell, and exec here has no TTY: run bare it
+    /// would sit waiting for input that can never arrive. `-e` runs one command
+    /// and exits, and repeats to build a session — `en` first, because the show
+    /// commands worth having need enable.
+    private static let routingTools: [(String, [String])] = [
+        ("bgp summary", ["imish", "-e", "en", "-e", "show ip bgp summary"]),
+        ("bgp neighbors", ["imish", "-e", "en", "-e", "show ip bgp neighbors"]),
+        ("routes", ["imish", "-e", "en", "-e", "show ip route bgp"]),
+        ("bfd", ["imish", "-e", "en", "-e", "show bfd interface"]),
+        ("running-config", ["imish", "-e", "en", "-e", "show running-config bgp"]),
+    ]
+
+    /// ZebOS ships as `f5-tmm-routing` on BNK, but the name is matched loosely
+    /// rather than pinned: the same container is called zebos or ocnos in other
+    /// builds, and a wrong guess here only costs the shortcuts, not the shell.
+    private static func isRouting(_ container: String) -> Bool {
+        let name = container.lowercased()
+        return name.contains("routing") || name.contains("zebos") || name.contains("ocnos")
+    }
+
+    private var quick: [(String, [String])] {
+        Self.isRouting(toolContainer) ? Self.routingTools : Self.debugTools
+    }
+
     // Pool members are deliberately absent. `pool_name` pads to 63 characters
     // on this cluster, so nothing fits beside it and tmctl stacks the table into
     // blocks — and the same numbers are already a chart on TMM Live. A button
@@ -37,15 +64,18 @@ struct TerminalView: View {
 
     private var pods: [K8s.Pod] { store.current?.tmmPods ?? [] }
 
-    /// Where the diagnostics live, and the only container this screen uses.
+    private var containers: [String] { pod?.logSources ?? [] }
+
+    /// Which container the commands run in.
     ///
-    /// `tmctl` exists solely in the debug container — asking `f5-tmm` for it
-    /// returns "executable file not found in $PATH" — so there is nothing for a
-    /// container picker to usefully choose between. It had one; it was clutter
-    /// pretending to be a control.
+    /// This screen used to hard-wire `debug`, on the grounds that `tmctl` lives
+    /// only there and a picker would be clutter pretending to be a control.
+    /// That held right up until the routing container: `imish` is the ZebOS
+    /// shell and exists only in `f5-tmm-routing`, so there is now something
+    /// real to choose between and the picker earns its place.
     private var toolContainer: String {
-        let available = pod?.logSources ?? []
-        return available.contains("debug") ? "debug" : (available.first ?? "debug")
+        if let container, containers.contains(container) { return container }
+        return containers.contains("debug") ? "debug" : (containers.first ?? "debug")
     }
 
     var body: some View {
@@ -69,7 +99,8 @@ struct TerminalView: View {
         .background(Theme.bg)
         .noNavigationBar()
         .onAppear { if pod == nil { pod = pods.first } }
-        .onChange(of: store.selected) { _, _ in pod = pods.first; exec.clear() }
+        .onChange(of: store.selected) { _, _ in pod = pods.first; container = nil; exec.clear() }
+        .onChange(of: pod?.metadata.name) { _, _ in container = nil }
     }
 
     private var toolbar: some View {
@@ -97,9 +128,19 @@ struct TerminalView: View {
             }
             .menuStyle(.button).buttonStyle(.plain)
 
+            Menu {
+                ForEach(containers, id: \.self) { name in
+                    Button(name) { container = name }
+                }
+            } label: {
+                chip(toolContainer, icon: containers.count > 1 ? "chevron.down" : nil)
+            }
+            .menuStyle(.button).buttonStyle(.plain)
+            .disabled(containers.count < 2)
+
             Divider().frame(height: 18).overlay(Theme.border)
 
-            ForEach(Self.quick, id: \.0) { label, command in
+            ForEach(quick, id: \.0) { label, command in
                 Button { runCommand(command, in: toolContainer) } label: { chip(label) }
                     .buttonStyle(.plain)
                     .disabled(exec.running)
@@ -148,14 +189,46 @@ struct TerminalView: View {
             Text(toolContainer)
                 .font(Theme.mono(11.5)).foregroundStyle(Theme.faint)
             Text("$").font(Theme.mono(13, weight: .semibold)).foregroundStyle(Theme.ok)
-            TextField("tmctl -d blade tmm_stat", text: $input)
-                .textFieldStyle(.plain)
-                .font(Theme.mono(13))
-                .foregroundStyle(Theme.fg)
-                .autocorrectionDisabled()
-                .noAutocaps()
-                .focused($inputFocused)
-                .onSubmit { submit() }
+            ZStack(alignment: .leading) {
+                // The suggestion is drawn behind the field, with the part
+                // already typed rendered clear so its tail begins exactly at
+                // the caret rather than near it.
+                if let completion {
+                    (Text(input).foregroundStyle(.clear) + Text(completion).foregroundStyle(Theme.faint))
+                        .font(Theme.mono(13))
+                        .lineLimit(1)
+                        .allowsHitTesting(false)
+                }
+                TextField("", text: $input)
+                    .textFieldStyle(.plain)
+                    .font(Theme.mono(13))
+                    .foregroundStyle(Theme.fg)
+                    .autocorrectionDisabled()
+                    .noAutocaps()
+                    .focused($inputFocused)
+                    .onSubmit { submit() }
+                    .onKeyPress(.tab) {
+                        guard completion != nil else { return .ignored }
+                        accept()
+                        return .handled
+                    }
+            }
+
+            if completion != nil {
+                // Tab is the habit this borrows from, but an iPad without a
+                // keyboard has no Tab key, so the hint is also the button.
+                Button { accept() } label: {
+                    Text("tab ⇥")
+                        .font(Theme.mono(10.5, weight: .semibold))
+                        .foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 7).frame(height: 22)
+                        .background(Theme.secondary, in: RoundedRectangle(cornerRadius: 5))
+                        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.border))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Accept the suggested command")
+            }
+
             Button("Run") { submit() }
                 .buttonStyle(.borderedProminent)
                 .disabled(input.trimmingCharacters(in: .whitespaces).isEmpty || exec.running)
@@ -164,11 +237,42 @@ struct TerminalView: View {
         .background(Theme.card)
     }
 
+    /// What Tab would add: the tail of the first suggestion that extends what
+    /// has been typed.
+    ///
+    /// An empty line suggests this container's first diagnostic, which is what
+    /// the placeholder used to do — badly. A placeholder cannot be accepted and
+    /// disappears at the first keystroke, so it showed a command and then took
+    /// it away at the moment the reader tried to use it.
+    private var completion: String? {
+        if input.isEmpty { return example }
+        guard let match = suggestions.first(where: { $0.hasPrefix(input) && $0.count > input.count })
+        else { return nil }
+        return String(match.dropFirst(input.count))
+    }
+
+    /// Commands already run, most recent first, then this container's own
+    /// diagnostics. Re-running what was just run is the common case.
+    private var suggestions: [String] {
+        var seen = Set<String>()
+        return (exec.runs.reversed().map(\.command) + quick.map { Argv.join($0.1) })
+            .filter { seen.insert($0).inserted }
+    }
+
+    private var example: String { Argv.join(quick.first?.1 ?? []) }
+
+    private func accept() {
+        guard let completion else { return }
+        input += completion
+        inputFocused = true
+    }
+
     private func submit() {
-        // Split on whitespace only. There is no shell here to interpret quotes
-        // or pipes — the command is handed to the container's exec directly,
-        // which is a real limit and better shown than hidden behind a fake one.
-        let parts = input.split(separator: " ").map(String.init)
+        // Quotes are honoured, because imish takes a whole ZebOS command as one
+        // argument. Pipes and redirection still are not: there is no shell on
+        // the far side of exec, and that is a real limit better shown than
+        // hidden behind a fake one.
+        let parts = Argv.split(input)
         guard !parts.isEmpty else { return }
         input = ""
         runCommand(parts, in: toolContainer)

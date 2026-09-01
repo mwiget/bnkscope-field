@@ -1,5 +1,6 @@
-# Builds the Mac app on every merge to main and attaches it to a GitHub release,
-# so there is always a current download without anyone opening Xcode.
+# Builds the Mac app on every merge to main, signs and notarizes it, and
+# attaches it to a GitHub release — so there is always a current download that
+# opens on anyone's Mac without Gatekeeper arguing about it.
 #
 # Cost note: macOS runners bill at ten times the Linux rate and this repository
 # is private, so a run that takes a few minutes of wall clock counts as tens of
@@ -49,18 +50,76 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      # Ad-hoc, because there is no Developer ID certificate to sign with yet.
-      # That is enough for macOS to run the app; it is not enough for Gatekeeper
-      # to let it run unprompted, which is what the release notes explain. Doing
-      # it properly needs a Developer ID Application certificate in a throwaway
-      # keychain, `--options runtime --timestamp`, then notarytool and stapler.
-      # None of that is written here because none of it can be tested until the
-      # certificate exists.
-      - name: Sign
+      # Signed with Developer ID and notarized, which is what lets a download
+      # open on someone else's Mac. Both halves are needed: the signature says
+      # who built it, the notarization says Apple has scanned it, and Gatekeeper
+      # wants both. The certificate goes into a keychain created for this run
+      # and thrown away with the runner, so the default keychain is untouched.
+      - name: Sign and notarize
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
         run: |
+          set -euo pipefail
           APP="build/Build/Products/Release/bnkscope Field.app"
-          codesign --force --deep --sign - "$APP"
-          codesign --verify --strict --deep "$APP"
+
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          echo "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$KEYCHAIN" \
+            -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          # Without this codesign would block on a GUI prompt for the key, which
+          # on a runner means hanging until the job times out.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" \
+            $(security list-keychains -d user | tr -d '"')
+
+          # No --deep: the bundle has no nested code, and Apple deprecates it.
+          # The hardened runtime and a secure timestamp are both preconditions
+          # for notarization rather than nice-to-haves.
+          codesign --force --options runtime --timestamp \
+            --sign "$SIGNING_IDENTITY" "$APP"
+          codesign --verify --strict --verbose=2 "$APP"
+
+          echo "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "$RUNNER_TEMP/notarize.zip"
+          # --wait can return success for a submission Apple rejected, so the
+          # status is read rather than inferred from the exit code.
+          set +e
+          RESULT=$(xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --key "$RUNNER_TEMP/notary.p8" \
+            --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID" \
+            --wait --timeout 30m --output-format json)
+          STATUS=$?
+          set -e
+          echo "$RESULT"
+          SUBMISSION=$(echo "$RESULT" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))' || true)
+          VERDICT=$(echo "$RESULT" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))' || true)
+          if [ "$VERDICT" != "Accepted" ] || [ "$STATUS" -ne 0 ]; then
+            echo "notarization did not succeed: $VERDICT"
+            [ -n "$SUBMISSION" ] && xcrun notarytool log "$SUBMISSION" \
+              --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" \
+              --issuer "$NOTARY_ISSUER_ID" || true
+            rm -f "$RUNNER_TEMP/notary.p8"
+            exit 1
+          fi
+          rm -f "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/notarize.zip"
+
+          # Stapling puts the ticket inside the app, so a Mac that is offline
+          # or behind a filtering proxy still sees it as notarized.
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
 
       - name: Check what was built
         run: |
@@ -68,6 +127,11 @@ jobs:
           lipo -archs "$APP/Contents/MacOS/bnkscope Field"
           test -f "$APP/Contents/Resources/AppIcon.icns"
           python3 Tools/check-icns.py "$APP/Contents/Resources/AppIcon.icns"
+          # The one check that speaks for a downloader's Mac rather than ours.
+          # "source=Notarized Developer ID" is the verdict that means the zip
+          # below will open without anyone being sent to System Settings.
+          spctl --assess --type execute -vvv "$APP" 2>&1 | tee /tmp/spctl.txt
+          grep -q "source=Notarized Developer ID" /tmp/spctl.txt
 
       - name: Package
         id: package

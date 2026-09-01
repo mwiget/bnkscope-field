@@ -50,13 +50,37 @@ save_once() {
     echo "── saved your kubeconfigs ($(ls -1 "$SAVED" 2>/dev/null | wc -l | tr -d ' ') files)"
 }
 
-# What the app should already hold when a take starts. No arguments means the
-# empty app, which is where the import beat begins.
-stage() {
+# What the app should already hold when a take starts. No argument means the
+# empty app, which is where the import beat begins; "seed" means the three
+# clusters that beat imports, so every later beat starts from the same place
+# regardless of what ran before it.
+#
+# The seed is captured from a real import rather than written by hand: the app
+# splits a multi-context file into one kubeconfig per context and names them
+# itself, and a hand-made set would drift from whatever it does next.
+SEED_DIR="$HERE/build/seed"
+# The app must actually be gone before the files change under it: it reads the
+# directory once, at launch. A take that staged three clusters into a process
+# that was already up filmed an empty app and looked like a staging bug.
+quit_app() {
     osascript -e 'tell application "bnkscope Field" to quit' >/dev/null 2>&1 || true
+    local waited=0
+    while pgrep -x "bnkscope Field" >/dev/null && [ $waited -lt 10 ]; do
+        sleep 1; waited=$((waited + 1))
+    done
+    pgrep -x "bnkscope Field" >/dev/null && pkill -x "bnkscope Field" >/dev/null 2>&1 || true
     sleep 1
+}
+
+stage() {
+    quit_app
     rm -rf "$LIVE"; mkdir -p "$LIVE"
-    for f in "$@"; do cp "$SAVED/$f" "$LIVE/" 2>/dev/null || true; done
+    if [ "${1:-}" = seed ]; then
+        cp "$SEED_DIR"/*.kubeconfig "$LIVE/" 2>/dev/null || {
+            echo "   no seed yet — run beat2Import first"; return 1
+        }
+    fi
+    echo "   staged $(ls -1 "$LIVE" 2>/dev/null | wc -l | tr -d ' ') kubeconfigs"
 }
 
 build() {
@@ -105,24 +129,31 @@ set_window() {
 # One take. The recording is bounded by -V rather than stopped by hand: a
 # screencapture killed mid-write leaves a file QuickTime cannot open.
 #
-# Order matters. The app is staged, launched and measured first, because
-# -l<windowid> needs a window that already exists; only then does the driver
-# attach to it and start clicking.
+# The display is filmed and then cropped to the window, rather than the window
+# being filmed directly with -l<windowid>. -l is cleaner — it cannot pick up
+# anything in front — but it captures only that one window, and a sheet is a
+# child window: the file-open panel simply did not appear in the take. Cropping
+# to the measured rectangle keeps the sheet and still excludes the desktop.
+#
+# Order matters: the app is staged, launched and measured before recording, so
+# the crop rectangle is known before a frame is written.
 take() {
     local name="$1" test="$2" seconds="$3"; shift 3
     stage "$@"
     set_window
     open -a "bnkscope Field"
     sleep 4
-    local wid
-    if ! wid="$("$HERE/build/windowid" "bnkscope Field" 2>/dev/null)"; then
+    local geom
+    if ! geom="$("$HERE/build/windowid" "bnkscope Field" 2>/dev/null)"; then
         echo "   no window to film"; return 1
     fi
-    echo "── $name (${seconds}s, window $wid)"
-    rm -f "$OUT/$name.mov"
-    # -o drops the window shadow, which is transparent padding the crop would
-    # otherwise have to remove; -k draws the clicks the driver makes.
-    screencapture -v -k -C -x -o -V "$seconds" -l"$wid" "$OUT/$name.mov" &
+    set -- $geom
+    local wid=$1 wx=$2 wy=$3 ww=$4 wh=$5
+    echo "── $name (${seconds}s, window $wid at $wx,$wy ${ww}x${wh})"
+    rm -f "$OUT/$name.mov" "$OUT/$name.mp4"
+    # -k draws the clicks the driver makes, which is the only cue on screen that
+    # anything is being operated rather than playing back.
+    screencapture -v -k -C -x -D 1 -V "$seconds" "$OUT/$name.mov" &
     local rec=$!
     sleep 1
     # test-without-building: a full `test` spends most of a minute re-checking
@@ -138,22 +169,47 @@ take() {
     done
     kill -0 $job 2>/dev/null && { kill -TERM $job 2>/dev/null || true; }
     wait $rec 2>/dev/null || true
-    osascript -e 'tell application "bnkscope Field" to quit' >/dev/null 2>&1 || true
-    if [ -s "$OUT/$name.mov" ]; then
-        echo "   $(du -h "$OUT/$name.mov" | cut -f1) $(ffprobe -v error -show_entries stream=width,height -of csv=p=0 "$OUT/$name.mov" 2>/dev/null)"
-    else
-        echo "   EMPTY TAKE"
-    fi
+    quit_app
+    [ -s "$OUT/$name.mov" ] || { echo "   EMPTY TAKE"; return 1; }
+
+    # Crop to the window, drop the title bar with its recording indicator, and
+    # normalise to 1080p so every beat is the same size whatever the display was.
+    local px=$((wx * 2)) py=$((wy * 2 + TITLEBAR)) pw=$((ww * 2)) ph=$((wh * 2 - TITLEBAR))
+    ffmpeg -nostdin -y -i "$OUT/$name.mov" \
+        -vf "crop=$pw:$ph:$px:$py,scale=1920:1080:flags=lanczos,fps=30" \
+        -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -an \
+        "$OUT/$name.mp4" >/dev/null 2>&1
+    rm -f "$OUT/$name.mov"
+    echo "   $(du -h "$OUT/$name.mp4" | cut -f1) $(ffprobe -v error -show_entries stream=width,height,duration -of csv=p=0 "$OUT/$name.mp4" 2>/dev/null)"
 }
 
 save_once
 [ "${SKIP_BUILD:-0}" = 1 ] || build
 
+# name | test | seconds | staged state. Seconds is the beat's own dwell plus the
+# launch and settle at the head, which assembly trims off.
+sequence() {
+    cat <<'SEQ'
+beat1Empty|beat1Empty|22|
+beat2Import|beat2Import|50|
+beat3Clusters|beat3Clusters|32|seed
+beat4Explore|beat4Explore|46|seed
+beat5TMMLive|beat5TMMLive|100|seed
+beat6TerminalDebug|beat6TerminalDebug|44|seed
+beat7TerminalRouting|beat7TerminalRouting|46|seed
+beat8Logs|beat8Logs|38|seed
+beat9Close|beat9Close|18|seed
+SEQ
+}
+
 if [ $# -gt 0 ]; then
-    # A named beat, re-shot on its own: ./record-macos.sh beat4Logs 30
-    take "$1" "$1" "${2:-30}"
+    # A named beat, re-shot on its own: ./record-macos.sh beat4Explore 46 seed
+    take "$1" "$1" "${2:-30}" ${3:+"$3"}
     exit 0
 fi
 
-echo "record-macos.sh: pass a beat name and duration, e.g."
-echo "  ./record-macos.sh beat9Close 20"
+while IFS='|' read -r name test seconds state; do
+    [ -z "${name:-}" ] && continue
+    take "$name" "$test" "$seconds" ${state:+"$state"} || true
+done <<< "$(sequence)"
+echo "── all takes in $OUT"

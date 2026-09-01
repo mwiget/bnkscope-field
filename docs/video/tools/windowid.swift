@@ -30,7 +30,14 @@ guard let window = mine, let id = window[kCGWindowNumber as String] as? Int else
     FileHandle.standardError.write(Data("no on-screen window for \"\(owner)\"\n".utf8))
     exit(1)
 }
-if let b = window[kCGWindowBounds as String] as? [String: Any] {
-    FileHandle.standardError.write(Data("\(owner) window \(id): \(b["Width"] ?? "?")x\(b["Height"] ?? "?") at \(b["X"] ?? "?"),\(b["Y"] ?? "?")\n".utf8))
+// "id x y width height", in points with a top-left origin. The recorder needs
+// the rectangle as well as the id: a sheet — the file-open panel is one — is a
+// child window, which -l<windowid> excludes, so those beats are filmed from the
+// display and cropped to this rectangle instead.
+guard let b = window[kCGWindowBounds as String] as? [String: Any],
+      let x = b["X"] as? Double, let y = b["Y"] as? Double,
+      let w = b["Width"] as? Double, let h = b["Height"] as? Double else {
+    FileHandle.standardError.write(Data("window \(id) has no bounds\n".utf8))
+    exit(1)
 }
-print(id)
+print("\(id) \(Int(x)) \(Int(y)) \(Int(w)) \(Int(h))")

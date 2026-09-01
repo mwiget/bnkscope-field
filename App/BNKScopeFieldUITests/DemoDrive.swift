@@ -177,8 +177,11 @@ final class DemoDrive: XCTestCase {
     /// folder takes the path directly rather than clicking through a file tree
     /// that looks like nothing in particular on camera.
     func beat2Import() throws {
+        // Short: the walk from Overview to Clusters is trimmed off the head of
+        // this take, and holding on the empty list afterwards only pushes the
+        // interesting part further from the cut point.
         goTo("Clusters")
-        dwell(Beat.read)
+        dwell(1.2)
         tap("Import kubeconfig")
         dwell(2.5)
         // The panel opens on the home directory, where the file is, so this is a
@@ -196,7 +199,11 @@ final class DemoDrive: XCTestCase {
             return
         }
         press(file)
-        dwell(1.5)
+        // Held, so the take has slack around the panel rather than closing it
+        // the instant the row highlights. The privacy mask over the file list
+        // is a time window, and a window with no margin either clips the panel
+        // or bleeds onto the cluster list that replaces it.
+        dwell(4.0)
         let open = sheet.buttons["Open"]
         if open.exists { press(open) } else { app.typeKey(.return, modifierFlags: []) }
         // Three contexts read, three keys into the keychain, three probes. The

@@ -126,6 +126,33 @@ set_window() {
     defaults write "$BUNDLE" "$key" "40 60 $WIN_W $WIN_H 0 0 1470 923 "
 }
 
+# Privacy masks, in the 1920x1080 frame every take is normalised to.
+#
+# The macOS open panel lists the operator's home directory, and on a working
+# machine that means customer and project names. Those rows are blurred; the
+# generic system folders and the file actually being imported stay readable, so
+# the panel still reads as a file browser rather than as a redaction.
+#
+# The mask is bounded in time because the rectangle is only a file list while
+# the panel is up — once it closes the same region is the cluster list, and
+# blurring that would be damage rather than privacy.
+#
+# The window deliberately ENDS LATE, after the panel has gone. The two failure
+# modes are not equal: ending late blurs a second of cluster list that the cut
+# is then set to skip, while ending early exposes every filename in the panel
+# for as long as it takes to close. An earlier window ended at 23.5 and the
+# panel was still up at 23.6, with every name legible. So the end is generous
+# and build-video.sh starts the following segment after it.
+mask_for() {
+    case "$1" in
+    beat2Import)
+        cat <<'MASK'
+split=5[b][r1][r2][r3][r4];[r1]crop=417:60:608:309,avgblur=14[m1];[r2]crop=417:151:608:400,avgblur=14[m2];[r3]crop=417:59:608:583,avgblur=14[m3];[r4]crop=417:20:608:728,avgblur=8[m4];[b][m1]overlay=608:309:enable='between(t,12.6,26)'[o1];[o1][m2]overlay=608:400:enable='between(t,12.6,26)'[o2];[o2][m3]overlay=608:583:enable='between(t,12.6,26)'[o3];[o3][m4]overlay=608:728:enable='between(t,12.6,26)'[v]
+MASK
+        ;;
+    esac
+}
+
 # One take. The recording is bounded by -V rather than stopped by hand: a
 # screencapture killed mid-write leaves a file QuickTime cannot open.
 #
@@ -175,10 +202,18 @@ take() {
     # Crop to the window, drop the title bar with its recording indicator, and
     # normalise to 1080p so every beat is the same size whatever the display was.
     local px=$((wx * 2)) py=$((wy * 2 + TITLEBAR)) pw=$((ww * 2)) ph=$((wh * 2 - TITLEBAR))
-    ffmpeg -nostdin -y -i "$OUT/$name.mov" \
-        -vf "crop=$pw:$ph:$px:$py,scale=1920:1080:flags=lanczos,fps=30" \
-        -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -an \
-        "$OUT/$name.mp4" >/dev/null 2>&1
+    local chain="crop=$pw:$ph:$px:$py,scale=1920:1080:flags=lanczos,fps=30"
+    local mask; mask="$(mask_for "$name")"
+    if [ -n "$mask" ]; then
+        ffmpeg -nostdin -y -i "$OUT/$name.mov" \
+            -filter_complex "[0:v]$chain,$mask" -map "[v]" \
+            -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -an \
+            "$OUT/$name.mp4" >/dev/null 2>&1
+    else
+        ffmpeg -nostdin -y -i "$OUT/$name.mov" -vf "$chain" \
+            -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p -an \
+            "$OUT/$name.mp4" >/dev/null 2>&1
+    fi
     rm -f "$OUT/$name.mov"
     echo "   $(du -h "$OUT/$name.mp4" | cut -f1) $(ffprobe -v error -show_entries stream=width,height,duration -of csv=p=0 "$OUT/$name.mp4" 2>/dev/null)"
 }

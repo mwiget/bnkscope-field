@@ -33,7 +33,7 @@ wav_len() { python3 -c "import wave;w=wave.open('$1');print(round(w.getnframes()
 # where the app is launching or the screen has not settled yet.
 sequence() {
     cat <<'SEQ'
-card|bnkscope Field~on macOS|scene01|
+slide|title|scene01|
 video|beat1Empty|scene01b|3
 video|beat2Import|scene02|6
 video|beat3Clusters|scene03|5
@@ -45,7 +45,7 @@ video|beat6TerminalDebug|scene08|5
 video|beat7TerminalRouting|scene09|6
 video|beat8Logs|scene10|4
 video|beat9Close|scene11|3
-card|bnkscope Field~github.com/mwiget/bnkscope-field|scene11b|
+slide|close|scene11b|
 SEQ
 }
 
@@ -59,6 +59,17 @@ make_card() {
     ffmpeg -nostdin -y -loop 1 -i "$png" -t "$seconds" -r 30 \
         -c:v libx264 -preset medium -crf 19 -pix_fmt yuv420p "$out" >/dev/null 2>&1
     rm -f "$png"
+}
+
+# A slide rendered from the F5 corporate template by make-slides.sh. Preferred
+# over a card: it carries F5's logo, type and colour bar, so the video opens the
+# way an F5 deck does rather than in a typeface of my choosing.
+make_slide() {
+    local name="$1" seconds="$2" out="$3"
+    local png="$HERE/build/slides/$name.png"
+    [ -f "$png" ] || { echo "missing slide: $name — run ./make-slides.sh" >&2; return 1; }
+    ffmpeg -nostdin -y -loop 1 -i "$png" -t "$seconds" -r 30 \
+        -c:v libx264 -preset medium -crf 19 -pix_fmt yuv420p "$out" >/dev/null 2>&1
 }
 
 # One visual segment, cut to exactly `target` seconds.
@@ -97,6 +108,7 @@ while IFS='|' read -r kind source scene head; do
 
     case "$kind" in
         card)  make_card "${source%%~*}" "${source#*~}" "$target" "$seg" ;;
+        slide) make_slide "$source" "$target" "$seg" ;;
         video) make_video "$source" "${head:-0}" "$target" "$seg" ;;
     esac
     echo "file '$seg'" >> "$WORK/list.txt"

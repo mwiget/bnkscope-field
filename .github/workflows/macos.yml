@@ -11,6 +11,12 @@ name: macOS app
 on:
   push:
     branches: [main]
+    # A macOS runner bills at ten times the Linux rate, and prose does not
+    # change the binary. Release notes are deliberately not listed: editing
+    # those should produce a release that carries them.
+    paths-ignore:
+      - README.md
+      - docs/**
   workflow_dispatch:
 
 permissions:

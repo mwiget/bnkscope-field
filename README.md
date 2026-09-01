@@ -1,8 +1,9 @@
 # bnkscope Field
 
-An iPad front end for [bnkscope](https://github.com/mwiget/bnkscope), talking to
-Kubernetes clusters directly from the device. No Docker, no server, no bnkscope
-instance to point at.
+An iPad and Mac front end for
+[bnkscope](https://github.com/mwiget/bnkscope), talking to Kubernetes clusters
+directly from the device. No Docker, no server, no bnkscope instance to point
+at.
 
 ## What it is
 
@@ -10,22 +11,58 @@ Point it at a kubeconfig and it becomes a live view of a BNK cluster: TMM CPU,
 throughput and connections charted in real time, virtual-server and pool-member
 traffic, pod logs, a command runner, a resource browser, and an overview that
 sorts clusters by what is actually wrong. It is a troubleshooting tool for
-someone standing next to the rack with an iPad, not a replacement for the
-Grafana stack.
+someone standing next to the rack with an iPad, or at a desk with a laptop, not
+a replacement for the Grafana stack.
 
-## How it works on the iPad
+One target builds both platforms. Nothing about the transport, the parsing or
+the charts is platform-specific; two SwiftUI calls that exist only on iOS hide
+behind shims in `Portable.swift`, and that is the whole of the divergence.
+
+## Getting it
+
+**macOS** — every merge to `main` publishes a signed, notarized universal build:
+
+```
+https://github.com/mwiget/bnkscope-field/releases/latest/download/bnkscope-Field-macOS.zip
+```
+
+Unzip, drag to `/Applications`, open. macOS 15 or later, Apple Silicon or Intel.
+The notarization ticket is stapled into the bundle, so it opens on a Mac that is
+offline at first launch. You can check who built it before trusting it:
+
+```
+spctl --assess --type execute -vvv "/Applications/bnkscope Field.app"
+# accepted
+# source=Notarized Developer ID
+# origin=Developer ID Application: Marcel Wiget (HGECWA98QL)
+```
+
+**iPad** — no TestFlight build yet; open the project in Xcode and run it on a
+device.
+
+### First run, on either
+
+The app talks to apiservers on your own network, and both platforms gate the
+local subnet behind a per-app permission. Grant **Local Network** when asked,
+then **relaunch** — the permission is only read while a connection is being set
+up, so granting it to an app that is already running changes nothing until it
+restarts. A denial arrives as `NSURLErrorNotConnectedToInternet`, the same code
+a genuinely offline device reports, so the app tells the two apart by whether
+the address is one only the local network can reach.
+
+## How it works
 
 Import one or more kubeconfigs — a multi-context `~/.kube/config` is split into
 one cluster per context on import, so each can be removed on its own. Client
 certificates become keychain identities and bearer tokens are kept as they are;
 a context that shells out to `aws` or `kubelogin` is kept but marked unusable,
-because iOS runs no binaries.
+because the app runs no binaries.
 
 Everything then goes through **one door: the cluster's apiserver**. Reads are
 plain REST, logs stream from `pods/log`, commands run over `pods/exec`, and —
 the part that makes live telemetry possible — a TCP port inside a pod is reached
-through `pods/portforward`. Nothing is installed on the iPad's side of the
-network and no inbound access to the cluster is needed.
+through `pods/portforward`. Nothing is installed on this side of the network and
+no inbound access to the cluster is needed.
 
 For TMM telemetry the app injects a small exporter into each `f5-tmm` pod as an
 **ephemeral container**, which does not restart TMM. It then holds a port-forward
@@ -35,8 +72,10 @@ on the device: keeping the history, and turning counters into rates. An
 **Add** and a **Remove** button on TMM Live put the exporter in and take it out
 again; removal recreates the pods, so it asks for a typed confirmation.
 
-Backgrounding the app stops the scrape and closes the tunnel, and the resumed
-charts show a gap rather than a line drawn across minutes nobody measured.
+Backgrounding the app on iPadOS stops the scrape and closes the tunnel, and the
+resumed charts show a gap rather than a line drawn across minutes nobody
+measured. A Mac window that is merely behind another keeps scraping, because it
+was never suspended.
 
 Windows are whatever width you drag them to, and the layout follows the width
 rather than the device.
@@ -54,6 +93,44 @@ swift build
 .build/debug/bnkfield pods     ~/.kube/config my-context dpf-operator-system app=f5-tmm
 .build/debug/bnkfield scrape   ~/.kube/config my-context dpf-operator-system <tmm-pod> 9099
 ```
+
+The app itself builds for both platforms from the one target:
+
+```
+swift test
+xcodebuild -project App/BNKScopeField.xcodeproj -scheme BNKScopeField \
+  -destination 'platform=macOS' build
+xcodebuild -project App/BNKScopeField.xcodeproj -scheme BNKScopeField \
+  -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5)' build
+```
+
+## Releases
+
+Every merge to `main` builds, tests, signs, notarizes and publishes the Mac app
+— `.github/workflows/macos.yml`. The download above always points at the newest.
+
+Two of its checks exist because the failures they catch are silent ones:
+
+- `Tools/check-icns.py` reads the icon's chunk table and fails on a missing size.
+  A partial icon still builds and still launches — macOS just scales up the
+  largest size it finds — so nothing about a green build tells you. Not
+  hypothetical: given a classic appiconset, `actool` emitted four of the ten
+  sizes, and the Dock was upscaling a 256 to 1024. The Mac icon is now built by
+  `iconutil`, which given the very same PNGs writes all ten.
+- `spctl --assess` must answer `source=Notarized Developer ID`. Every other
+  check in the build speaks for the machine that made the app; this one speaks
+  for the machine downloading it.
+
+Signing needs six repository secrets: the Developer ID certificate as a base64
+`.p12` with its password, the identity name, and an App Store Connect API key —
+base64 `.p8`, key ID, issuer ID — for `notarytool`. Without them the build fails
+rather than quietly falling back to an ad-hoc signature Gatekeeper would reject.
+The certificate is imported into a keychain created for the run and discarded
+with it; `security set-key-partition-list` is what stops `codesign` blocking on
+a GUI prompt nobody can answer.
+
+macOS runners bill at ten times the Linux rate, which is why nothing builds on
+pull requests.
 
 ## The one connection
 
@@ -83,19 +160,26 @@ certificate for the name it knows itself by, not the one you dialled. Without
 this field the only way to use such a cluster is to turn verification off
 altogether, which is a far bigger hammer than the problem.
 
-**EC client certificates work on iOS and not from the macOS CLI harness.** k3s
-issues EC certs, and `SecItemAdd` refuses an EC key created from data into the
-macOS file keychain — every attribute combination returns "the specified item is
-no longer valid", which describes nothing. The data-protection keychain takes it
-happily, and that is the only keychain iOS has, so the app is fine and
-`bnkfield probe` is not. It is the one place the harness and the app genuinely
-diverge.
+**EC client certificates need different calls on each platform.** microk8s and
+k3s both issue them, and the macOS file keychain refuses an EC key handed to
+`SecItemAdd` as a reference: every attribute combination returns "the specified
+item is no longer valid", which describes nothing. Stating `kSecAttrKeyType` is
+what makes the same call work on iOS, and it does not transfer. `SecItemImport`
+— the macOS-native importer — takes both curves and RSA, and computes
+`kSecAttrApplicationLabel` itself, which is the attribute the identity pairing
+is looked up by. Deleting a cluster removes its key by that hash rather than by
+tag, because the file keychain accepts an `applicationTag` and then will not
+search on it.
+
+This was invisible for a long time because RSA clusters import fine either way.
+Only the one cluster with an EC cert failed, and it failed before reaching the
+network, so it looked like a connectivity problem.
 
 
 Client certificates and bearer tokens. A kubeconfig that shells out to `aws`,
 `gcloud` or `kubelogin` is parsed and kept, but marked unusable with the name of
-the binary in the reason — iOS runs no binaries, and a context that quietly
-disappears is worse than one that explains itself.
+the binary in the reason — the app runs no binaries on either platform, and a
+context that quietly disappears is worse than one that explains itself.
 
 Certificates become a keychain `SecIdentity`, which is the only thing URLSession
 will answer a client-certificate challenge with. Two things there are easy to get
@@ -132,15 +216,23 @@ Xcode 27 and the iOS 27 SDK, deployment target 27 — the OS the device this was
 built for actually runs. Building against 26 and deploying to a 27 device worked,
 but only by accident of compatibility.
 
+macOS deploys back to **15**, which is as far as it reaches: `presentationSizing`
+and `.page` in the resource browser are macOS 15 APIs and the only things that
+need more than 14. That floor is also where per-app Local Network permission
+arrives, so a Mac that can run this is a Mac that has the permission model the
+app expects. CI builds with the newest stable Xcode the runner has rather than a
+beta — verified against 26.6 and the macOS 26.5 SDK.
+
 Xcode 27's stricter concurrency checking is worth having: it caught a `@Sendable`
 closure capturing two `ISO8601DateFormatter`s, and a dead local kept alive by a
 `_ = run` that existed only to quiet the compiler.
 
 ## The app
 
-`App/BNKScopeField.xcodeproj` — a SwiftUI iPad app on top of `BNKKit`. Open it in
-Xcode and run; the project uses a synchronized file group, so new files under
-`App/BNKScopeField/` are picked up without editing the project.
+`App/BNKScopeField.xcodeproj` — a SwiftUI app for iPadOS and macOS on top of
+`BNKKit`. Open it in Xcode and pick a destination; the project uses a
+synchronized file group, so new files under `App/BNKScopeField/` are picked up
+without editing the project.
 
 **Clusters** imports kubeconfigs, probes each context and
 reports what it found — Kubernetes version, node readiness, and BNK / DPF / NICo
@@ -159,7 +251,7 @@ or not anything uses it, and fourteen flat zeroes are worse than nothing. Cross-
 97.19% CPU there, 97.5% and 97.4% here.
 
 There is no Prometheus in this path, so the two things it would do happen on the
-iPad: holding the history, and turning counters into rates. Only the derived
+device: holding the history, and turning counters into rates. Only the derived
 panel lines are kept — a scrape is ~2,400 series, and retaining all of them for
 half an hour would cost more than the app is worth.
 
@@ -234,6 +326,14 @@ sidebar on a 13-inch in portrait, where there is ample room for it. And because
 this app draws its own header rows and hides the navigation bar, the split view's
 built-in sidebar button goes with it — hence the explicit toggle, without which a
 narrow window has no way back to the cluster list.
+
+The wordmark sits at the sidebar's trailing edge on iPadOS and its leading edge
+on macOS, and the difference is not taste. iPadOS draws its close/minimise/resize
+controls over the top-left of the content and insets nothing to make room, so a
+mark in the corner lands underneath them and, worse, so does the button that
+reopens a collapsed sidebar. Centring is not enough — the row is about 180 pt
+wide in a 268 pt column. A Mac keeps those controls in a real title bar above the
+content, so there is nothing to dodge.
 
 ### Installing the exporter
 
@@ -321,8 +421,31 @@ Stdout and stderr are separated, and the exit code arrives on the status channel
 **No TTY, deliberately.** A TTY means a terminal emulator: cursor addressing,
 scroll regions, the alternate screen. What this is for is `tmctl`, `configview`
 and `bdt_cli` — commands that print and exit — and a shell that cannot run `vi`
-would be worse than no shell. There is no shell interpretation either: the
-command is split on whitespace and handed to exec, so no quotes and no pipes.
+would be worse than no shell. There is no shell on the far side either, so pipes
+and redirection genuinely do not work and are not faked.
+
+Quotes do work, and have to. `Argv.split` honours single quotes, double quotes
+and backslash the way a shell would, because `imish` takes a whole ZebOS command
+as a single argument: split on spaces, `show ip bgp summary` becomes four
+arguments and imish is handed nonsense. `Argv.join` is its inverse, so the
+command echoed above each result is one that can be edited and run again rather
+than a lossy rendering of what ran.
+
+**The container is chosen, not assumed.** This screen hard-wired `debug` for as
+long as `tmctl` was the only tool worth reaching, and the picker it once had
+really was clutter pretending to be a control. `imish` changes that: the ZebOS
+shell lives only in `f5-tmm-routing`, so selecting it swaps the diagnostics for
+BGP summary, neighbors, routes, BFD and running-config. Those run through
+`imish -e`, one command per flag, because bare `imish` is interactive and would
+wait forever for input that cannot arrive without a TTY.
+
+The prompt suggests a command rather than showing a placeholder. A placeholder
+is the one thing it cannot be — an offer: there is no way to accept it and it
+vanishes at the first keystroke, so it showed a command and then took it away
+exactly when someone tried to use it. The suggestion is drawn behind the field
+with the typed part rendered clear, so its tail starts at the caret, and **Tab**
+accepts it. An iPad without a keyboard has no Tab key, so the hint is also a
+button.
 
 The quick commands were checked against a live tmm pod, which changed two of
 them. The first set returned "No such column". The rest had to be trimmed to fit
@@ -454,3 +577,8 @@ would change what the document says.
   only thing this app writes to a cluster. Service chains, workloads and
   everything in the resource browser are shown, not edited.
 - **Secrets are not browsable**, deliberately — see Resources above.
+- **The Mac app is not sandboxed.** It has unrestricted filesystem and network
+  access once launched. Fine for a tool you build yourself; something a
+  corporate security review would reasonably ask about.
+- **No TestFlight build for the iPad.** The Mac side has a signed, notarized
+  download; the iPad still needs Xcode and a cable.

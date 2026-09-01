@@ -157,15 +157,26 @@ final class ManagedCluster: Identifiable {
         probeGeneration += 1
     }
 
-    /// A URLError says almost nothing useful on its own. The two cases that
-    /// actually happen here are worth naming, because the fix differs: a
-    /// kubeconfig pointing somewhere this device cannot route, versus a
-    /// certificate the device will not accept.
+    /// A URLError says almost nothing useful on its own. Three cases actually
+    /// happen here, and each has a different fix: a kubeconfig pointing
+    /// somewhere this device cannot route, a certificate the device will not
+    /// accept, and the OS refusing this app the local network outright.
     static func explain(_ error: Error) -> String {
         guard let url = error as? URLError else { return String(describing: error) }
         switch url.code {
         case .cannotConnectToHost, .timedOut, .networkConnectionLost:
-            return "no route to this address from the iPad"
+            return "no route to this address from \(Self.thisDevice)"
+        case .notConnectedToInternet:
+            // A Local Network denial arrives under the same code as a device
+            // with no network at all. Every cluster this app is pointed at is
+            // on a local subnet, so when the address is one only the local
+            // network can reach, the permission is much the likelier reading —
+            // and unlike "offline", it names its own fix.
+            if let host = url.failingURL?.host(), Net.isLocal(host: host) {
+                return "\(Self.thisDevice) is refusing this app the local network — "
+                     + "switch bnkscope Field on under \(Self.localNetworkSetting)"
+            }
+            return "\(Self.thisDevice) is not on a network"
         case .secureConnectionFailed, .serverCertificateUntrusted,
              .serverCertificateHasBadDate, .serverCertificateNotYetValid:
             return "the TLS handshake failed — check the certificate authority in the kubeconfig"
@@ -173,6 +184,16 @@ final class ManagedCluster: Identifiable {
             return url.localizedDescription
         }
     }
+
+    // What to call the machine, and where its privacy switch lives. The app
+    // runs on both, and an iPad's wording on a Mac reads as a bug.
+    #if os(macOS)
+    static let thisDevice = "this Mac"
+    static let localNetworkSetting = "System Settings › Privacy & Security › Local Network"
+    #else
+    static let thisDevice = "this iPad"
+    static let localNetworkSetting = "Settings › Privacy & Security › Local Network"
+    #endif
 }
 
 /// Every cluster the app holds, and the kubeconfigs they came from.

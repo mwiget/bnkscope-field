@@ -34,7 +34,7 @@ struct ClustersView: View {
             }
         }
         .background(Theme.bg)
-        .toolbar(.hidden, for: .navigationBar)
+        .noNavigationBar()
         .fileImporter(isPresented: $importing,
                       allowedContentTypes: [.yaml, .text, .data],
                       allowsMultipleSelection: true) { result in

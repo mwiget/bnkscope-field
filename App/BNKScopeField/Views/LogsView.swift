@@ -20,7 +20,7 @@ struct LogsView: View {
             body(for: logs)
         }
         .background(Theme.bg)
-        .toolbar(.hidden, for: .navigationBar)
+        .noNavigationBar()
         .task(id: store.selected) { await discoverNamespaces() }
     }
 
@@ -81,7 +81,7 @@ struct LogsView: View {
                 .font(Theme.mono(12.5))
                 .foregroundStyle(Theme.fg)
                 .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
+                .noAutocaps()
                 .frame(width: 200)
             if !logs.query.isEmpty {
                 Button { logs.query = "" } label: {

@@ -51,7 +51,7 @@ struct ExporterPanel: View {
         .task(id: "\(store.selected ?? "")#\(store.current?.probeGeneration ?? 0)") { await findOwners() }
         .alert("Recreate the TMM pods?", isPresented: $confirmingRemoval) {
             TextField("cluster name", text: $typed)
-                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .noAutocaps().autocorrectionDisabled()
             Button("Cancel", role: .cancel) { typed = "" }
             Button("Recreate pods and remove", role: .destructive) { Task { await remove() } }
                 .disabled(typed != store.current?.displayName)

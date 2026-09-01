@@ -243,3 +243,39 @@ struct F5NameTests {
         #expect(F5Names.looksLikeIPv4("203.0.113.105"))
     }
 }
+
+@Suite("Local addresses")
+struct LocalAddressTests {
+
+    @Test("the clusters this app actually talks to are local")
+    func realClusters() {
+        // Every cluster in the field kit sits on a home or lab subnet, which is
+        // why the Local Network permission is not an edge case for this app.
+        #expect(Net.isLocal(host: "192.168.68.113"))   // bnk232
+        #expect(Net.isLocal(host: "192.168.68.200"))   // dpu-cplane-tenant1
+        #expect(Net.isLocal(host: "192.168.68.66"))    // infra
+        #expect(Net.isLocal(host: "10.244.0.7"))       // a pod address
+        #expect(Net.isLocal(host: "172.17.0.1"))       // a docker bridge
+    }
+
+    @Test("names and loopback count as local")
+    func names() {
+        #expect(Net.isLocal(host: "localhost"))
+        #expect(Net.isLocal(host: "lake1.local"))
+        #expect(Net.isLocal(host: "127.0.0.1"))
+        #expect(Net.isLocal(host: "169.254.1.1"))
+        #expect(Net.isLocal(host: "::1"))
+        #expect(Net.isLocal(host: "[fe80::1]"))
+    }
+
+    @Test("routable addresses are not local")
+    func routable() {
+        #expect(!Net.isLocal(host: "8.8.8.8"))
+        #expect(!Net.isLocal(host: "172.32.0.1"))      // just past 172.16/12
+        #expect(!Net.isLocal(host: "172.15.0.1"))      // just before it
+        #expect(!Net.isLocal(host: "193.168.1.1"))     // not 192.168
+        #expect(!Net.isLocal(host: "api.example.com"))
+        #expect(!Net.isLocal(host: "1.2.3"))           // not four octets
+        #expect(!Net.isLocal(host: "999.1.1.1"))       // not an address
+    }
+}

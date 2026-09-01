@@ -133,23 +133,9 @@ public enum Identity {
         // "the specified item is no longer valid", which describes nothing. k3s
         // issues EC client certificates, so this is not a corner: it is every
         // k3s cluster.
-        var add: [CFString: Any] = [
-            kSecClass: kSecClassKey,
-            kSecAttrApplicationTag: tagData,
-            kSecAttrApplicationLabel: keyHash,
-            kSecAttrKeyClass: kSecAttrKeyClassPrivate,
-            kSecValueRef: key,
-        ]
-        if let attributes = SecKeyCopyAttributes(key) as? [CFString: Any],
-           let type = attributes[kSecAttrKeyType] {
-            add[kSecAttrKeyType] = type
-        }
-        var status = SecItemAdd(scoped(add), nil)
-        guard status == errSecSuccess || status == errSecDuplicateItem else {
-            throw Error.keychain("add key", status)
-        }
+        try addPrivateKey(key, pem: keyPEM, tag: tagData, label: keyHash)
 
-        status = SecItemAdd(scoped([
+        var status = SecItemAdd(scoped([
             kSecClass: kSecClassCertificate,
             kSecAttrLabel: tag,
             kSecValueRef: leaf,
@@ -196,6 +182,13 @@ public enum Identity {
         // it happens to carry.
         if let certPEM, let leaf = try? certificates(fromPEM: certPEM).first {
             SecItemDelete(scoped([kSecClass: kSecClassCertificate, kSecValueRef: leaf]))
+            // And the key by the hash of its public half, taken from the
+            // certificate. On macOS the file keychain will not search on
+            // kSecAttrApplicationTag at all, so the delete above finds nothing
+            // and this is the only one that lands.
+            if let pub = SecCertificateCopyKey(leaf), let hash = publicKeyHash(ofPublic: pub) {
+                SecItemDelete(scoped([kSecClass: kSecClassKey, kSecAttrApplicationLabel: hash]))
+            }
         }
     }
 
@@ -216,12 +209,89 @@ public enum Identity {
         guard let pub = SecKeyCopyPublicKey(privateKey) else {
             throw Error.badPrivateKey("no public key could be derived")
         }
-        var err: Unmanaged<CFError>?
-        guard let der = SecKeyCopyExternalRepresentation(pub, &err) as Data? else {
+        guard let hash = publicKeyHash(ofPublic: pub) else {
             throw Error.badPrivateKey("public key has no external representation")
         }
+        return hash
+    }
+
+    /// The same hash, for a public key already in hand — the one a certificate
+    /// carries, which is how a key is found again without its private half.
+    static func publicKeyHash(ofPublic pub: SecKey) -> Data? {
+        var err: Unmanaged<CFError>?
+        guard let der = SecKeyCopyExternalRepresentation(pub, &err) as Data? else { return nil }
         return Data(Insecure.SHA1.hash(data: der))
     }
+
+    /// Put the private key in the keychain, keyed by `label` so a certificate
+    /// can pair with it.
+    ///
+    /// The two platforms need different calls, and not for cosmetic reasons.
+    #if os(macOS)
+    /// The macOS file keychain will not take an EC private key through
+    /// `SecItemAdd(kSecValueRef:)`. It fails `errSecInvalidItemRef` — "the
+    /// specified item is no longer valid" — whatever `kSecAttrKeyType` says,
+    /// and stating the type is what makes the same call work on iOS. That is
+    /// not a corner: microk8s and k3s both issue EC client certificates, so it
+    /// is every such cluster, while RSA clusters import fine and hide it.
+    ///
+    /// `SecItemImport` is the macOS-native importer and takes both curves and
+    /// RSA. It also computes `kSecAttrApplicationLabel` itself — the SHA-1 of
+    /// the public key, which is the attribute the identity pairing is looked
+    /// up by — so the value does not have to be supplied, and in fact cannot
+    /// be: the file keychain rejects an update to it.
+    static func addPrivateKey(_ key: SecKey, pem: Data, tag: Data, label: Data) throws {
+        var format = SecExternalFormat.formatOpenSSL
+        var type = SecExternalItemType.itemTypePrivateKey
+        var params = SecItemImportExportKeyParameters()
+        var imported: CFArray?
+        // A nil keychain imports to memory only; the item has to outlive the
+        // call, so the default keychain is named explicitly.
+        let status = SecItemImport(pem as CFData, "pem" as CFString, &format, &type,
+                                   SecItemImportExportFlags(rawValue: 0), &params,
+                                   defaultKeychain(), &imported)
+        guard status == errSecSuccess || status == errSecDuplicateItem else {
+            throw Error.keychain("import key", status)
+        }
+        // Best effort. The tag is how a cluster names its own key, but the file
+        // keychain accepts the update and then will not search on it, so
+        // everything that has to find this key again goes by `label` instead.
+        SecItemUpdate(scoped([kSecClass: kSecClassKey, kSecAttrApplicationLabel: label]),
+                      [kSecAttrApplicationTag: tag] as CFDictionary)
+    }
+
+    /// `SecKeychain` is deprecated wholesale, and there is no replacement that
+    /// `SecItemImport` will accept: its only alternative is a nil keychain,
+    /// which imports to memory and drops the key when the call returns. The
+    /// deprecation warning this raises is the honest cost of the import path
+    /// above, and is left where it is rather than hidden behind a wrapper.
+    static func defaultKeychain() -> SecKeychain? {
+        var keychain: SecKeychain?
+        SecKeychainCopyDefault(&keychain)
+        return keychain
+    }
+    #else
+    /// kSecAttrKeyType has to be stated. RSA happens to work without it — it is
+    /// what the keychain assumes — and an EC key is rejected with "the
+    /// specified item is no longer valid", which describes nothing.
+    static func addPrivateKey(_ key: SecKey, pem: Data, tag: Data, label: Data) throws {
+        var add: [CFString: Any] = [
+            kSecClass: kSecClassKey,
+            kSecAttrApplicationTag: tag,
+            kSecAttrApplicationLabel: label,
+            kSecAttrKeyClass: kSecAttrKeyClassPrivate,
+            kSecValueRef: key,
+        ]
+        if let attributes = SecKeyCopyAttributes(key) as? [CFString: Any],
+           let type = attributes[kSecAttrKeyType] {
+            add[kSecAttrKeyType] = type
+        }
+        let status = SecItemAdd(scoped(add), nil)
+        guard status == errSecSuccess || status == errSecDuplicateItem else {
+            throw Error.keychain("add key", status)
+        }
+    }
+    #endif
 
     /// Which keychain the item goes in.
     ///

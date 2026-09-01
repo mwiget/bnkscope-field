@@ -67,7 +67,7 @@ struct TerminalView: View {
             }
         }
         .background(Theme.bg)
-        .toolbar(.hidden, for: .navigationBar)
+        .noNavigationBar()
         .onAppear { if pod == nil { pod = pods.first } }
         .onChange(of: store.selected) { _, _ in pod = pods.first; exec.clear() }
     }
@@ -153,7 +153,7 @@ struct TerminalView: View {
                 .font(Theme.mono(13))
                 .foregroundStyle(Theme.fg)
                 .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
+                .noAutocaps()
                 .focused($inputFocused)
                 .onSubmit { submit() }
             Button("Run") { submit() }

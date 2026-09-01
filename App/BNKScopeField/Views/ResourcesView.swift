@@ -19,7 +19,7 @@ struct ResourcesView: View {
             content
         }
         .background(Theme.bg)
-        .toolbar(.hidden, for: .navigationBar)
+        .noNavigationBar()
         .task(id: "\(store.selected ?? "")#\(store.current?.probeGeneration ?? 0)") { await start() }
         // Another screen may have sent us here to look at one object.
         .task(id: navigator.pending) { await honourRequest() }
@@ -71,7 +71,7 @@ struct ResourcesView: View {
                 Image(systemName: "magnifyingglass").font(.system(size: 13)).foregroundStyle(Theme.muted)
                 TextField("Search", text: $resources.query)
                     .textFieldStyle(.plain).font(Theme.mono(12.5)).foregroundStyle(Theme.fg)
-                    .autocorrectionDisabled().textInputAutocapitalization(.never)
+                    .autocorrectionDisabled().noAutocaps()
                     .frame(width: 180)
             }
             .padding(.horizontal, 12).frame(height: 32)

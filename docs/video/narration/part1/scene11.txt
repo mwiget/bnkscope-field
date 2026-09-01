@@ -1,1 +1,1 @@
-That is bnkscope Field on macOS. It is a notarized download — the link is in the README — and the same code builds for iPad from source.
+That is bnkscope Field on macOS.

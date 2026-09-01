@@ -34,6 +34,7 @@ wav_len() { python3 -c "import wave;w=wave.open('$1');print(round(w.getnframes()
 sequence() {
     cat <<'SEQ'
 card|bnkscope Field~on macOS|scene01|
+video|beat1Empty|scene01b|3
 video|beat2Import|scene02|6
 video|beat3Clusters|scene03|5
 video|beat4Explore|scene04|4
@@ -43,7 +44,8 @@ video|beat5TMMLive|scene07|62
 video|beat6TerminalDebug|scene08|5
 video|beat7TerminalRouting|scene09|6
 video|beat8Logs|scene10|4
-card|bnkscope Field~github.com/mwiget/bnkscope-field|scene11|
+video|beat9Close|scene11|3
+card|bnkscope Field~github.com/mwiget/bnkscope-field|scene11b|
 SEQ
 }
 

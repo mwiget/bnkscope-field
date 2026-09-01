@@ -1,0 +1,1 @@
+It starts with nothing in it. One kubeconfig goes in — this one holds three contexts — and Field reads every context in the file, turning each into a cluster it can hold on its own. The client keys go straight to the keychain.

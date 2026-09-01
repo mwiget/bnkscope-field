@@ -120,29 +120,40 @@ final class DemoDrive: XCTestCase {
     // MARK: - Helpers for the Mac cut
 
     /// Click a row in the cluster sidebar by the context name it shows.
+    ///
+    /// The row is a Button whose label is the whole card run together —
+    /// "dpu-cplane-tenant1, 192.168.68.200 · v1.34.0, BNK, DPU" — so it is
+    /// matched on its prefix. Looking for a StaticText of the bare name finds
+    /// nothing, silently leaves whatever cluster was selected last, and films
+    /// the right screen on the wrong cluster.
     func selectCluster(_ name: String) {
-        let row = app.staticTexts[name]
+        let row = app.buttons
+            .matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
         guard row.waitForExistence(timeout: 30) else {
-            XCTFail("no cluster row \"\(name)\"")
+            XCTFail("no cluster row starting \"\(name)\"")
             return
         }
         press(row)
         dwell(Beat.glance)
     }
 
-    /// Switch the Terminal's container picker. The picker is a menu, so this is
-    /// two clicks: open it, then choose. Matched on a prefix because the routing
-    /// container is f5-tmm-routing on BNK and zebos or ocnos elsewhere.
-    func pickContainer(startingWith prefix: String) {
-        let picker = app.popUpButtons.firstMatch
+    /// Switch the Terminal's container picker.
+    ///
+    /// There are two menus on that row — the pod and the container — and they
+    /// are MenuButtons, not popUpButtons. Taking the first match picks the pod,
+    /// which changes nothing visible and leaves the debug tools on screen. This
+    /// one is found by the container it currently shows.
+    func pickContainer(from current: String, startingWith prefix: String) {
+        let picker = app.menuButtons
+            .matching(NSPredicate(format: "title == %@", current)).firstMatch
         guard picker.waitForExistence(timeout: 20) else {
-            XCTFail("no container picker")
+            XCTFail("no container picker showing \"\(current)\"")
             return
         }
         press(picker)
-        dwell(0.8)
-        let item = app.menuItems.containing(
-            NSPredicate(format: "label BEGINSWITH %@", prefix)).firstMatch
+        dwell(1.0)
+        let item = app.menuItems
+            .matching(NSPredicate(format: "title BEGINSWITH %@", prefix)).firstMatch
         guard item.waitForExistence(timeout: 10) else {
             XCTFail("no container starting \"\(prefix)\"")
             return
@@ -243,7 +254,7 @@ final class DemoDrive: XCTestCase {
         selectCluster("dpu-cplane-tenant1")
         goTo("Terminal")
         dwell(Beat.read)
-        pickContainer(startingWith: "f5-tmm-routing")
+        pickContainer(from: "debug", startingWith: "f5-tmm-routing")
         dwell(2.0)
         tap("bgp summary")
         dwell(14.0)

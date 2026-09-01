@@ -1,0 +1,1 @@
+Overview is the screen worth opening first, because it ranks what is wrong rather than listing what exists. Here it has found four things on the tenant cluster: two dssm pods running but not ready, a readiness probe timing out on the controller, and no exporter on either TMM pod.

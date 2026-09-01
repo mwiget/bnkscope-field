@@ -1,0 +1,1 @@
+This is bnkscope Field, running on a MacBook Air. It is a native app that talks to Kubernetes clusters over their own apiserver — no agent to install, no Prometheus, no port forward held open from a laptop. Everything you are about to see is a live lab.

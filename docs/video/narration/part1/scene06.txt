@@ -1,0 +1,1 @@
+TMM Live needs something to scrape, and that is what the exporter is. Field injects it as an ephemeral container into the running TMM pod — no restart, no manifest, nothing left behind in git. The pod keeps serving while it happens.

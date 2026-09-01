@@ -1,1 +1,0 @@
-One connection per cluster, and it is the API server. No ingress, no collector, nothing installed except the exporter you choose to add. Just a tablet and a kubeconfig.

@@ -1,1 +1,0 @@
-Logs need nothing installed at all. A container's output is captured on the node, and the API server streams it back through the same door everything else here uses. Twenty-four containers at once, merged into one view in time order. When one of them drowns the rest, it can be muted. The stream stays open, so unmuting shows what was missed rather than starting again.

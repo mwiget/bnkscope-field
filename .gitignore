@@ -2,5 +2,24 @@
 .swiftpm/
 *.xcuserdatad
 DerivedData/
+.DS_Store
+
+# Credentials must never land in here. None ever have — this is to keep it that
+# way now that the repository is readable by everyone. A stray kubeconfig is the
+# realistic accident: they are what this app consumes, so they end up nearby.
+*.kubeconfig
+kubeconfigs/
+.kube/
+*.p12
+*.p8
+*.pem
+*.key
+*.cer
+*.crt
+*.certSigningRequest
+*.mobileprovision
+
+# The video kit, if it comes back.
 docs/video/build/
 docs/video/takes/
+docs/video/kit/voice/

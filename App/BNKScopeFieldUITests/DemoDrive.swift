@@ -264,7 +264,10 @@ final class DemoDrive: XCTestCase {
         pickContainer(from: "debug", startingWith: "f5-tmm-routing")
         dwell(2.0)
         tap("bgp summary")
-        dwell(14.0)
+        // Long enough to read the summary, short enough that the second command
+        // still lands inside the take. At 14s it did not, and the cut promised
+        // routes the picture never showed.
+        dwell(9.0)
         tap("routes")
         dwell(12.0)
     }
@@ -278,7 +281,10 @@ final class DemoDrive: XCTestCase {
             ? app.searchFields.firstMatch : app.textFields["Search"]
         if search.waitForExistence(timeout: 10) {
             press(search)
-            app.typeText("bgp")
+            // A term that actually occurs. "bgp" narrowed 2436 held lines to
+            // none, which is a truthful screen and a useless demonstration:
+            // the point is watching the stream narrow, not watching it empty.
+            app.typeText("tmm")
             dwell(14.0)
         } else {
             XCTFail("no log search field")

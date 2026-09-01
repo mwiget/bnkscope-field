@@ -43,9 +43,9 @@ video|beat4Explore|scene05|26
 slide|tmmpod|scene05b|
 video|beat5TMMLive|scene06|5
 video|beat5TMMLive|scene07|62
-video|beat6TerminalDebug|scene08|5
-video|beat7TerminalRouting|scene09|6
-video|beat8Logs|scene10|4
+video|beat6TerminalDebug|scene08|19.5
+video|beat7TerminalRouting|scene09|28
+video|beat8Logs|scene10|16
 video|beat9Close|scene11|3
 slide|close|scene11b|
 SEQ

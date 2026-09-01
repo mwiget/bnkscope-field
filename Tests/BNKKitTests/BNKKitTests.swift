@@ -10,7 +10,7 @@ import Testing
     clusters:
     - cluster:
         certificate-authority-data: Y2E=
-        server: https://192.168.68.200:32170
+        server: https://203.0.113.20:32170
       name: dpu-cplane-tenant1
     contexts:
     - context:
@@ -26,7 +26,7 @@ import Testing
     """)
     #expect(cfg.contexts.count == 1)
     let c = try #require(cfg.context(named: "kubernetes-admin@dpu-cplane-tenant1"))
-    #expect(c.server.absoluteString == "https://192.168.68.200:32170")
+    #expect(c.server.absoluteString == "https://203.0.113.20:32170")
     #expect(c.namespace == "dpf-operator-system")
     #expect(c.caPEM == Data("ca".utf8))
     #expect(c.auth == .clientCertificate(certPEM: Data("crt".utf8), keyPEM: Data("key".utf8)))
@@ -247,21 +247,21 @@ struct F5NameTests {
 @Suite("Local addresses")
 struct LocalAddressTests {
 
-    @Test("the clusters this app actually talks to are local")
-    func realClusters() {
-        // Every cluster in the field kit sits on a home or lab subnet, which is
-        // why the Local Network permission is not an edge case for this app.
-        #expect(Net.isLocal(host: "192.168.68.113"))   // bnk232
-        #expect(Net.isLocal(host: "192.168.68.200"))   // dpu-cplane-tenant1
-        #expect(Net.isLocal(host: "192.168.68.66"))    // infra
+    @Test("the ranges a cluster in a lab actually sits on")
+    func privateRanges() {
+        // Local Network permission is not an edge case for this app: a
+        // kubeconfig nearly always points at one of these.
+        #expect(Net.isLocal(host: "192.168.1.10"))     // a home or lab subnet
+        #expect(Net.isLocal(host: "10.0.0.1"))         // a routed lab network
         #expect(Net.isLocal(host: "10.244.0.7"))       // a pod address
         #expect(Net.isLocal(host: "172.17.0.1"))       // a docker bridge
+        #expect(Net.isLocal(host: "172.31.255.254"))   // the top of 172.16/12
     }
 
     @Test("names and loopback count as local")
     func names() {
         #expect(Net.isLocal(host: "localhost"))
-        #expect(Net.isLocal(host: "lake1.local"))
+        #expect(Net.isLocal(host: "apiserver.local"))
         #expect(Net.isLocal(host: "127.0.0.1"))
         #expect(Net.isLocal(host: "169.254.1.1"))
         #expect(Net.isLocal(host: "::1"))

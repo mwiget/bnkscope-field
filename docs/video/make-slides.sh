@@ -25,14 +25,16 @@ ssh "$HOST" "cd $remote && uv run --quiet --with python-pptx python make-slides.
     --template $remote/template.pptx --out $remote/out"
 # Slides that already exist, lifted from the decks this lab's own video was
 # built from. Reusing them rather than redrawing is the point: they are the
-# same claims, already reviewed, already published in that cut — and the two
-# chosen here are exactly the context this demo assumes. "lab" says what the
-# three clusters are; "tmmpod" names the containers the Terminal beats enter.
+# same claims, already reviewed, already published in that cut. "lab" says what
+# the three clusters are, which the demo otherwise assumes.
+#
+# A "tmmpod" slide listing the pod's containers was here too and came out: the
+# Terminal beats show the container picker and run commands in two of them, so
+# the slide spent twelve seconds saying what the next ninety show.
 #
 #      name    deck                        slide
 DECK_SLIDES="
 lab      docs/tmm-consumable-exec.pptx     10
-tmmpod   docs/tmm-consumable-exec.pptx     17
 "
 ssh "$HOST" "bash -s" <<REMOTE
 set -euo pipefail

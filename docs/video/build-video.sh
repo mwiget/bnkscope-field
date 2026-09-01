@@ -40,7 +40,6 @@ video|beat3Clusters|scene03|5
 slide|lab|scene03b|
 video|beat4Explore|scene04|4
 video|beat4Explore|scene05|26
-slide|tmmpod|scene05b|
 video|beat5TMMLive|scene06|5
 video|beat5TMMLive|scene07|62
 video|beat6TerminalDebug|scene08|19.5

@@ -20,6 +20,9 @@ tags:
   - macOS
   - SwiftUI
 description: |
+  Source, and a notarized macOS download:
+  https://github.com/mwiget/bnkscope-field
+
   bnkscope Field is a native macOS and iPadOS app that talks to Kubernetes
   clusters over their own apiserver. There is no agent to install in the
   cluster, no Prometheus, and no port forward held open from a laptop — every
@@ -49,8 +52,6 @@ description: |
   02:24 Logs, filtered
   02:38 Close
 
-  Source and a notarized macOS download:
-  https://github.com/mwiget/bnkscope-field
-
   The recording itself is reproducible: docs/video/record-macos.sh drives the
   real app with XCUITest and films it, so no part of this was performed by hand.
+  The whole kit is in docs/video/ of the repo above.

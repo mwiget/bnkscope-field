@@ -23,7 +23,7 @@ jobs:
   build:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # The newest Xcode the runner has, rather than its default, which lags.
       # Verified against Xcode 26.6 / macOS 26.5 SDK; the app needs nothing

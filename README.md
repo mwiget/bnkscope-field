@@ -566,6 +566,13 @@ will dump it: `NSNull` and `NSNumber` are not things it can represent, and a JSO
 `true` is an `NSNumber` that dumps as `1` unless you check for `CFBoolean`, which
 would change what the document says.
 
+## License
+
+Apache 2.0, copyright F5, Inc. — the same terms and the same holder as
+[bnkscope](https://github.com/mwiget/bnkscope) and
+[bnk-forge](https://github.com/f5devcentral/bnk-forge), which this is a
+companion to.
+
 ### Known gaps
 
 - **Direct mode only.** There is no in-cluster collector, so history is whatever

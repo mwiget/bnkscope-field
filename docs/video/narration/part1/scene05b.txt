@@ -1,0 +1,1 @@
+Inside one TMM pod there are eight containers. Three of them matter here: the debug sidecar, ZebOS for routing, and the stat exporter — which is the one Field is about to add.

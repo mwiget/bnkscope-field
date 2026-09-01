@@ -34,11 +34,13 @@ wav_len() { python3 -c "import wave;w=wave.open('$1');print(round(w.getnframes()
 sequence() {
     cat <<'SEQ'
 slide|title|scene01|
-video|beat1Empty|scene01b|3
-video|beat2Import|scene02|6
+video|beat2Import|scene02|5
+video|beat2Import|scene02b|20
 video|beat3Clusters|scene03|5
+slide|lab|scene03b|
 video|beat4Explore|scene04|4
 video|beat4Explore|scene05|26
+slide|tmmpod|scene05b|
 video|beat5TMMLive|scene06|5
 video|beat5TMMLive|scene07|62
 video|beat6TerminalDebug|scene08|5

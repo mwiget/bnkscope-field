@@ -337,9 +337,25 @@ already a chart on TMM Live.
 `Tools/make-icon.swift` draws it from the same path data as
 `frontend-v2/public/icons/bnkscope-small.svg` in the bnkscope repository, so the
 app and the web UI carry one shape rather than two drawings of the same idea.
-Run it with `swift Tools/make-icon.swift <out.png>` and drop the result into the
-asset catalogue. It fills the square edge to edge — iOS masks its own corners,
-and drawing rounded ones underneath that gives a double rounding.
+Run it with
+
+```
+swift Tools/make-icon.swift App/BNKScopeField/Assets.xcassets/AppIcon.appiconset \
+                           App/BNKScopeField/AppIcon.icns
+```
+
+which writes both platforms' artwork. They differ, and not decoratively. The iOS
+image fills the square edge to edge, because iOS masks its own corners and
+drawing rounded ones underneath gives a double rounding. macOS masks nothing, so
+its icon is the mark inset in a rounded square on Apple's grid — 824pt centred on
+1024 — with the margin left transparent.
+
+The Mac icon is an `.icns` built here by `iconutil` rather than left to the asset
+catalogue. Handed a classic appiconset, actool in Xcode 27 emits four of the ten
+sizes — 16, 32, 128 and 256 — and the Dock then scales a 256 up to 1024, which
+shows. `iconutil`, given exactly the same PNGs, writes all ten. `App/Info.plist`
+exists only to carry `CFBundleIconFile`, which is the one key Xcode's generated
+Info.plist has no `INFOPLIST_KEY_` for.
 
 ### NICo
 

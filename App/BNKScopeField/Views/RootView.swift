@@ -84,6 +84,13 @@ struct RootView: View {
 }
 
 private struct Sidebar: View {
+
+    #if os(macOS)
+    static let wordmarkAlignment: Alignment = .leading
+    #else
+    static let wordmarkAlignment: Alignment = .trailing
+    #endif
+
     @Environment(ClusterStore.self) private var store
     @Binding var section: Section
 
@@ -115,14 +122,18 @@ private struct Sidebar: View {
                     .background(Theme.ember.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
                     .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Theme.ember.opacity(0.25)))
             }
-            // Trailing, not leading. In a window rather than full screen, iPadOS
-            // draws its close/minimise/resize controls over the top-left corner
-            // and does not inset the content to make room. Centring was tried
-            // and is not enough: the row is about 180 pt wide in a 268 pt
-            // column, so the mark still lands under the controls. The trailing
-            // edge is the one position that clears them without depending on
-            // how wide they are or how wide the sidebar has been dragged.
-            .frame(maxWidth: .infinity, alignment: .trailing)
+            // Trailing on iPadOS, leading on macOS, and the difference is not
+            // taste. In a window rather than full screen, iPadOS draws its
+            // close/minimise/resize controls over the top-left corner and does
+            // not inset the content to make room. Centring was tried and is not
+            // enough: the row is about 180 pt wide in a 268 pt column, so the
+            // mark still lands under the controls. The trailing edge is the one
+            // position that clears them whatever their width.
+            //
+            // A Mac puts its controls in a real title bar, above the content
+            // rather than on top of it, so there is nothing to dodge and the
+            // wordmark belongs where the eye looks for it.
+            .frame(maxWidth: .infinity, alignment: Self.wordmarkAlignment)
             .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 14)
 
             VStack(spacing: 2) {
@@ -171,7 +182,7 @@ private struct Sidebar: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.card)
-        .toolbar(.hidden, for: .navigationBar)
+        .noNavigationBar()
     }
 }
 
@@ -259,6 +270,15 @@ struct StatusDot: View {
 /// enough for the sidebar to collapse — and on iPadOS a window is whatever width
 /// it is dragged to — that left no way back to the cluster list.
 struct SidebarToggle: View {
+
+    /// Room for the system's own window controls, which only iPadOS draws over
+    /// the app's content.
+    #if os(macOS)
+    static let windowControlInset: CGFloat = 0
+    #else
+    static let windowControlInset: CGFloat = 72
+    #endif
+
     @Binding var columns: NavigationSplitViewVisibility
 
     var body: some View {
@@ -276,10 +296,11 @@ struct SidebarToggle: View {
         }
         .buttonStyle(.plain)
         // With the sidebar collapsed this button is the leftmost thing on the
-        // screen, which in a window is exactly where the system's own controls
-        // sit — and a button under them cannot be pressed, so the sidebar could
-        // not be reopened. Only the collapsed state needs the room.
-        .padding(.leading, columns == .detailOnly ? 72 : 0)
+        // screen, which on iPadOS in a window is exactly where the system's own
+        // controls sit — and a button under them cannot be pressed, so the
+        // sidebar could not be reopened. Only the collapsed state needs the
+        // room, and only on iPadOS: a Mac's controls are in the title bar.
+        .padding(.leading, columns == .detailOnly ? Self.windowControlInset : 0)
         .accessibilityLabel(columns == .detailOnly ? "Show clusters" : "Hide clusters")
     }
 }

@@ -30,7 +30,7 @@ struct NICoView: View {
             }
         }
         .background(Theme.bg)
-        .toolbar(.hidden, for: .navigationBar)
+        .noNavigationBar()
         // Keyed on the probe as well as the selection: the first render lands
         // before probing has said what this cluster is, and reselecting the same
         // cluster afterwards is not a change on its own.

@@ -243,3 +243,78 @@ struct F5NameTests {
         #expect(F5Names.looksLikeIPv4("203.0.113.105"))
     }
 }
+
+@Suite("Local addresses")
+struct LocalAddressTests {
+
+    @Test("the clusters this app actually talks to are local")
+    func realClusters() {
+        // Every cluster in the field kit sits on a home or lab subnet, which is
+        // why the Local Network permission is not an edge case for this app.
+        #expect(Net.isLocal(host: "192.168.68.113"))   // bnk232
+        #expect(Net.isLocal(host: "192.168.68.200"))   // dpu-cplane-tenant1
+        #expect(Net.isLocal(host: "192.168.68.66"))    // infra
+        #expect(Net.isLocal(host: "10.244.0.7"))       // a pod address
+        #expect(Net.isLocal(host: "172.17.0.1"))       // a docker bridge
+    }
+
+    @Test("names and loopback count as local")
+    func names() {
+        #expect(Net.isLocal(host: "localhost"))
+        #expect(Net.isLocal(host: "lake1.local"))
+        #expect(Net.isLocal(host: "127.0.0.1"))
+        #expect(Net.isLocal(host: "169.254.1.1"))
+        #expect(Net.isLocal(host: "::1"))
+        #expect(Net.isLocal(host: "[fe80::1]"))
+    }
+
+    @Test("routable addresses are not local")
+    func routable() {
+        #expect(!Net.isLocal(host: "8.8.8.8"))
+        #expect(!Net.isLocal(host: "172.32.0.1"))      // just past 172.16/12
+        #expect(!Net.isLocal(host: "172.15.0.1"))      // just before it
+        #expect(!Net.isLocal(host: "193.168.1.1"))     // not 192.168
+        #expect(!Net.isLocal(host: "api.example.com"))
+        #expect(!Net.isLocal(host: "1.2.3"))           // not four octets
+        #expect(!Net.isLocal(host: "999.1.1.1"))       // not an address
+    }
+}
+
+@Suite("Command lines")
+struct ArgvTests {
+
+    @Test("plain commands split on whitespace")
+    func plain() {
+        #expect(Argv.split("tmctl -d blade tmm_stat") == ["tmctl", "-d", "blade", "tmm_stat"])
+        #expect(Argv.split("  ip   -s  link  ") == ["ip", "-s", "link"])
+        #expect(Argv.split("") == [])
+    }
+
+    @Test("imish needs one argument to hold a whole ZebOS command")
+    func quoted() {
+        // The reason quoting exists here at all: without it this is six
+        // arguments and imish is handed nonsense.
+        #expect(Argv.split(#"imish -e en -e "show ip bgp summary""#)
+                == ["imish", "-e", "en", "-e", "show ip bgp summary"])
+        #expect(Argv.split("imish -e 'show ip route bgp'") == ["imish", "-e", "show ip route bgp"])
+    }
+
+    @Test("quotes and backslashes behave as a shell would")
+    func escapes() {
+        #expect(Argv.split(#"a "b c" d"#) == ["a", "b c", "d"])
+        #expect(Argv.split(#"one\ two"#) == ["one two"])
+        #expect(Argv.split(#"'a\b'"#) == [#"a\b"#])          // literal inside single quotes
+        #expect(Argv.split(#""" x"#) == ["", "x"])            // an empty argument
+        #expect(Argv.split(#""unterminated"#) == ["unterminated"])
+    }
+
+    @Test("joining is what splitting undoes")
+    func roundTrip() {
+        for line in [["imish", "-e", "en", "-e", "show ip bgp summary"],
+                     ["tmctl", "-d", "blade", "tmm_stat"],
+                     ["echo", "a b", "c"],
+                     ["weird", #"quote"inside"#]] {
+            #expect(Argv.split(Argv.join(line)) == line)
+        }
+    }
+}

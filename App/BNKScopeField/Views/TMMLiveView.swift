@@ -18,7 +18,7 @@ struct TMMLiveView: View {
             content
         }
         .background(Theme.bg)
-        .toolbar(.hidden, for: .navigationBar)
+        .noNavigationBar()
         // Keyed on the probe as well as the selection. Installing an exporter
         // changes what there is to scrape without changing which cluster is
         // selected, and the first version only watched the selection — so a

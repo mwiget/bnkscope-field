@@ -27,7 +27,7 @@ struct DPUView: View {
             }
         }
         .background(Theme.bg)
-        .toolbar(.hidden, for: .navigationBar)
+        .noNavigationBar()
         .task(id: "\(store.selected ?? "")#\(store.current?.probeGeneration ?? 0)") { await reload() }
     }
 

@@ -35,7 +35,7 @@ final class ExecEngine {
         guard !command.isEmpty else { return }
         task?.cancel()
         running = true
-        runs.append(ExecRun(command: command.joined(separator: " "), container: container))
+        runs.append(ExecRun(command: Argv.join(command), container: container))
         if runs.count > Self.historyLimit { runs.removeFirst(runs.count - Self.historyLimit) }
         let index = runs.count - 1
 

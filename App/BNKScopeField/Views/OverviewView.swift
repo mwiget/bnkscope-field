@@ -45,7 +45,7 @@ struct OverviewView: View {
             }
         }
         .background(Theme.bg)
-        .toolbar(.hidden, for: .navigationBar)
+        .noNavigationBar()
         .task(id: generation) { await overview.scan(store.clusters) }
         .fileImporter(isPresented: $importing,
                       allowedContentTypes: [.yaml, .text, .data],

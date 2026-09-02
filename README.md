@@ -6,7 +6,7 @@ directly from the device. No Docker, no server, no bnkscope instance to point
 at.
 
 **Watch it** (unlisted — anyone with the link can view):
-**[bnkscope Field on macOS](https://youtu.be/3P-SYutL7P8)** (2:48) — three
+**[bnkscope Field on macOS](https://youtu.be/csPt0KHbl3Y)** (2:38) — three
 clusters imported from one kubeconfig, an exporter injected into a running TMM
 pod, live telemetry, commands in the debug and routing containers, and the log
 stream filtered. A live lab, not a mock-up, and recorded by a script rather than

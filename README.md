@@ -6,7 +6,7 @@ directly from the device. No Docker, no server, no bnkscope instance to point
 at.
 
 **Watch it** (unlisted — anyone with the link can view):
-**[bnkscope Field on macOS](https://youtu.be/3P-SYutL7P8)** (2:48) — three
+**[bnkscope Field on macOS](https://youtu.be/csPt0KHbl3Y)** (2:38) — three
 clusters imported from one kubeconfig, an exporter injected into a running TMM
 pod, live telemetry, commands in the debug and routing containers, and the log
 stream filtered. A live lab, not a mock-up, and recorded by a script rather than
@@ -108,6 +108,25 @@ swift build
 .build/debug/bnkfield pods     ~/.kube/config my-context dpf-operator-system app=f5-tmm
 .build/debug/bnkfield scrape   ~/.kube/config my-context dpf-operator-system <tmm-pod> 9099
 ```
+
+**On a Mac, do not point those at a kubeconfig the app is also using.** `contexts`
+is safe — it parses YAML and never opens a connection. Every other command builds
+a `KubeClient`, and for a client-certificate context that means `Identity`
+importing the key into the login keychain. It clears the old entries first, and
+one of those deletes matches on the public key's SHA-1 rather than on the tag:
+
+```swift
+SecItemDelete(scoped([kSecClass: kSecClassKey, kSecAttrApplicationLabel: keyHash]))
+```
+
+Same key, same hash — so it finds the app's item too, whatever tag it was filed
+under. Whichever binary adds the key back owns the ACL, and the other one starts
+failing `PRIVATE_KEY_OPERATION_FAILED` on every request. Recovery is
+`security delete-identity -Z <sha1>` and a re-import from the app.
+
+So use a copy of the kubeconfig under a different context name, or run it
+somewhere without a keychain. On Linux the problem does not arise, which is the
+other reason this command-line front end is worth keeping.
 
 The app itself builds for both platforms from the one target:
 

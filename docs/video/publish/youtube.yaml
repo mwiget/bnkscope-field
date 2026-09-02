@@ -3,8 +3,8 @@ privacy: unlisted
 # Set by the upload. Only --thumbnail-only uses it: videos.insert is the sole
 # call there is, so a corrected cut is a new video and a new URL, never a
 # replacement of this one.
-video_id: 3P-SYutL7P8
-thumbnail_at: 88.0
+video_id: csPt0KHbl3Y
+thumbnail_at: 82.6
 # Relative to the tmm-lb-nico kit, which is where upload-youtube.py lives and
 # what it resolves paths against. Sibling checkouts, the same assumption
 # make-slides.sh makes.
@@ -41,16 +41,16 @@ description: |
   Chapters:
   00:00 What it is
   00:05 Importing a kubeconfig
-  00:26 Three clusters, probed
-  00:41 The lab behind them
-  00:54 Overview: what is wrong, ranked
-  01:14 Resources
-  01:27 Installing the exporter
-  01:43 TMM Live
-  01:58 Terminal: the debug container
-  02:10 Terminal: BGP from the routing container
-  02:24 Logs, filtered
-  02:38 Close
+  00:25 Three clusters, probed
+  00:39 The lab behind them
+  00:51 Overview: what is wrong, ranked
+  01:10 Resources
+  01:22 Installing the exporter
+  01:37 TMM Live
+  01:51 Terminal: the debug container
+  02:02 Terminal: BGP from the routing container
+  02:16 Logs, filtered
+  02:28 Close
 
   The recording itself is reproducible: docs/video/record-macos.sh drives the
   real app with XCUITest and films it, so no part of this was performed by hand.

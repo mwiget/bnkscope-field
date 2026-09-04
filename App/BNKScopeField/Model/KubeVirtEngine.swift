@@ -88,6 +88,24 @@ final class KubeVirtEngine {
 
     var withGPUs: Int { machines.filter { !$0.gpus.isEmpty }.count }
 
+    /// Machines whose root disk is an image. The other thing that separates a
+    /// VM that comes back from one that does not — after a stop, this time,
+    /// rather than a reboot.
+    var ephemeral: Int { machines.filter(\.bootsFromEphemeralDisk).count }
+
+    /// The virt-launcher pod running this machine, found on demand.
+    ///
+    /// Not in the VMI: `status.activePods` maps pod UIDs to nodes and never
+    /// names the pod. The launcher carries the machine's name in an
+    /// annotation, so it is one label-selected list in the namespace and a
+    /// match on that.
+    func launcherPod(of machine: KubeVirt.Machine, cluster: ManagedCluster) async -> String? {
+        guard let client = try? cluster.client() else { return nil }
+        let pods = (try? await client.pods(namespace: machine.namespace,
+                                           labelSelector: "kubevirt.io=virt-launcher")) ?? []
+        return pods.first { $0.metadata.annotations?["kubevirt.io/domain"] == machine.name }?.metadata.name
+    }
+
     /// Grouped by namespace, which is how tenancy is usually drawn.
     var byNamespace: [(namespace: String, machines: [KubeVirt.Machine])] {
         Dictionary(grouping: machines, by: \.namespace)

@@ -27,6 +27,7 @@ struct KubeVirtView: View {
                 ScrollView {
                     VStack(spacing: 16) {
                         if kubevirt.standalone > 0 { standaloneNote }
+                        if kubevirt.ephemeral > 0 { ephemeralNote }
                         ForEach(kubevirt.byNamespace, id: \.namespace) { group in
                             card(group.namespace, badge: "\(group.machines.count)") {
                                 ForEach(group.machines) { machine in
@@ -73,6 +74,16 @@ struct KubeVirtView: View {
                tone: Theme.muted)
     }
 
+    /// The other way a machine fails to come back. A standalone VMI is lost to
+    /// a reboot; a machine booting from a containerDisk is lost to a stop, and
+    /// nothing on the row says so until this does.
+    private var ephemeralNote: some View {
+        Banner(text: "\(kubevirt.ephemeral) of these boot from a containerDisk. That is an image, not a "
+                   + "disk: whatever the machine writes to its root filesystem is discarded when it stops, "
+                   + "and Start brings back the image.",
+               tone: Theme.muted)
+    }
+
     private func card(_ title: String, badge: String,
                       @ViewBuilder content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -115,6 +126,7 @@ private struct MachineRow: View {
     let machine: KubeVirt.Machine
     @Environment(ClusterStore.self) private var store
     @Environment(KubeVirtEngine.self) private var kubevirt
+    @Environment(Navigator.self) private var navigator
     /// Set by Stop and Restart, which interrupt a running machine. Start is
     /// additive and asks nothing.
     ///
@@ -135,23 +147,79 @@ private struct MachineRow: View {
                     Badge(text: machine.gpus.count == 1 ? "GPU" : "\(machine.gpus.count)× GPU",
                           color: Theme.ember)
                 }
+                // Said only when it is running and the cluster has said no. A
+                // passed-through card pins a machine to its node, and that is
+                // the fact that matters the day the node has to be drained.
+                if machine.isRunning, machine.isLiveMigratable == false {
+                    Badge(text: "not migratable", color: Theme.warn)
+                }
                 Spacer(minLength: 8)
                 actions
             }
 
-            // Everything below the title is one line of facts, because in a
-            // list of machines the comparison is horizontal: which one is on
-            // which node, which one got the card.
+            // The first line is where and how big, because in a list of
+            // machines the comparison is horizontal: which one is on which
+            // node, which one got the card. The second is what it is built as.
             Text(facts).font(Theme.mono(11)).foregroundStyle(Theme.muted)
                 .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            if !platform.isEmpty {
+                Text(platform).font(Theme.mono(11)).foregroundStyle(Theme.faint)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            }
 
-            if !machine.addresses.isEmpty {
-                HStack(spacing: 10) {
-                    ForEach(machine.addresses, id: \.ip) { address in
-                        Text("\(address.interface) \(address.ip)")
+            // One line per interface: the binding is the part that says how
+            // the packet leaves — a bridge onto a host segment, a masqueraded
+            // pod network, a VF the card handed over.
+            ForEach(machine.interfaces) { iface in
+                HStack(spacing: 8) {
+                    Text(iface.name).font(Theme.mono(11)).foregroundStyle(Theme.fg)
+                    Badge(text: iface.describedBinding,
+                          color: iface.binding == .sriov ? Theme.ember : Theme.muted)
+                    Text(iface.network).font(Theme.mono(11)).foregroundStyle(Theme.muted)
+                    if !iface.addresses.isEmpty {
+                        Text(iface.addresses.joined(separator: ", "))
+                            .font(Theme.mono(11)).foregroundStyle(Theme.fg)
+                    }
+                    if let mac = iface.mac {
+                        Text(mac).font(Theme.mono(11)).foregroundStyle(Theme.faint)
+                    }
+                    if let link = iface.linkState {
+                        StatusDot(color: link == "up" ? Theme.ok : Theme.bad, size: 6)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .lineLimit(1)
+            }
+
+            // One line per disk, and the word "ephemeral" on the ones that
+            // keep nothing. The image name is the backing, because on a
+            // containerDisk it is the whole of the story.
+            ForEach(machine.disks) { disk in
+                HStack(spacing: 8) {
+                    Text(disk.target ?? disk.kind).font(Theme.mono(11)).foregroundStyle(Theme.fg)
+                        .frame(width: 32, alignment: .leading)
+                    Text(disk.name).font(Theme.mono(11)).foregroundStyle(Theme.muted)
+                    if let bus = disk.bus {
+                        Text(bus).font(Theme.mono(11)).foregroundStyle(Theme.faint)
+                    }
+                    Text(disk.backing).font(Theme.mono(11)).foregroundStyle(Theme.muted)
+                        .truncationMode(.middle)
+                    if let bytes = disk.bytes {
+                        Text(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .binary))
                             .font(Theme.mono(11)).foregroundStyle(Theme.faint)
                     }
+                    if disk.isEphemeral {
+                        Text("ephemeral").font(.system(size: 10.5, weight: .semibold)).foregroundStyle(Theme.warn)
+                    }
+                    Spacer(minLength: 0)
                 }
+                .lineLimit(1)
+            }
+
+            if machine.vmi != nil {
+                Button("launcher pod") { revealLauncher() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.primary)
             }
 
             if let failure = kubevirt.actionFailure, failure.id == machine.id {
@@ -219,6 +287,29 @@ private struct MachineRow: View {
     private func run(_ action: KubeVirt.Action) {
         guard let cluster = store.current else { return }
         Task { await kubevirt.perform(action, on: machine, cluster: cluster) }
+    }
+
+    /// The pod that is this machine, opened in Resources — where its logs
+    /// and a shell are one tap further.
+    private func revealLauncher() {
+        guard let cluster = store.current else { return }
+        Task {
+            if let pod = await kubevirt.launcherPod(of: machine, cluster: cluster) {
+                navigator.reveal(pod: pod, namespace: machine.namespace)
+            }
+        }
+    }
+
+    /// `q35 · host-model · 4Gi of 16Gi · up 6h`, or as much of it as is known.
+    private var platform: String {
+        var parts: [String] = []
+        if let type = machine.machineType { parts.append(type) }
+        if let model = machine.cpuModel { parts.append(model) }
+        if let memory = machine.memory { parts.append(memory) }
+        if let since = machine.runningSince, machine.isRunning {
+            parts.append("up " + since.formatted(.relative(presentation: .numeric)).replacingOccurrences(of: " ago", with: ""))
+        }
+        return parts.joined(separator: "  ·  ")
     }
 
     private var facts: String {

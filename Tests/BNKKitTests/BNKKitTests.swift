@@ -555,18 +555,98 @@ struct KubeVirtTests {
                     .isDeclaredRunning)
     }
 
+    /// The spec says how the machine is built; the status says what it got.
+    /// Both are read, and the row is the join.
+    @Test func readsInterfacesWithTheirBindings() throws {
+        let vmi = try KubeClient.decoder.decode(KubeVirt.VirtualMachineInstance.self,
+                                                from: Data(Self.vmiJSON.utf8))
+        let ifaces = vmi.interfaces
+        #expect(ifaces.map(\.name) == ["default", "acme"])
+        #expect(ifaces[0].binding == .masquerade)
+        #expect(ifaces[0].network == "pod")
+        #expect(ifaces[0].addresses == ["203.0.113.82"])
+        #expect(ifaces[1].binding == .bridge)
+        #expect(ifaces[1].network == "tenant-a")
+        #expect(ifaces[1].mac == "02:00:00:00:00:02")
+        #expect(ifaces[1].linkState == "up")
+    }
+
+    /// The binding is a key whose presence is the message. A VF is the one
+    /// worth naming differently, and a plugin binding carries its own name.
+    @Test func namesAVirtualFunctionAndAPluginBinding() throws {
+        let json = """
+        [{"name": "vf", "sriov": {}, "macAddress": "02:00:00:00:00:0a"},
+         {"name": "pt", "binding": {"name": "passt"}},
+         {"name": "odd"}]
+        """
+        let ifaces = try KubeClient.decoder.decode([KubeVirt.VirtualMachineInstance.Interface].self,
+                                                   from: Data(json.utf8))
+        #expect(ifaces[0].binding == .sriov)
+        #expect(ifaces[0].describedBinding == "SR-IOV VF")
+        #expect(ifaces[0].macAddress == "02:00:00:00:00:0a")
+        #expect(ifaces[1].binding == .plugin)
+        #expect(ifaces[1].describedBinding == "passt")
+        #expect(ifaces[2].binding == .unknown)
+    }
+
+    /// A containerDisk is an image, and the row has to say so: nothing else
+    /// in the manifest warns that a stop throws the root filesystem away.
+    @Test func readsDisksAndWhetherTheySurviveAStop() throws {
+        let vmi = try KubeClient.decoder.decode(KubeVirt.VirtualMachineInstance.self,
+                                                from: Data(Self.vmiJSON.utf8))
+        let disks = vmi.disks
+        #expect(disks.map(\.name) == ["rootdisk", "cloudinit"])
+        #expect(disks[0].target == "vda")
+        #expect(disks[0].bus == "virtio")
+        #expect(disks[0].backing.hasPrefix("containerDisk quay.io/"))
+        #expect(disks[0].isEphemeral)
+        #expect(disks[1].backing == "cloud-init")
+        #expect(disks[1].bytes == 1_048_576)
+        let machine = KubeVirt.Machine(namespace: "default", name: "tenant-a", vm: nil, vmi: vmi)
+        #expect(machine.bootsFromEphemeralDisk)
+    }
+
+    @Test func readsThePlatformFacts() throws {
+        let vmi = try KubeClient.decoder.decode(KubeVirt.VirtualMachineInstance.self,
+                                                from: Data(Self.vmiJSON.utf8))
+        #expect(vmi.cpuModel == "host-model")
+        #expect(vmi.machineType == "q35")
+        // Current beats declared, and the hotplug ceiling rides along.
+        #expect(vmi.memory == "4Gi of 16Gi")
+        #expect(vmi.runningSince != nil)
+        #expect(vmi.isLiveMigratable == false)
+        #expect(vmi.launcherVersion == "1.8.4")
+    }
+
     static let vmiJSON = """
     {"metadata": {"name": "tenant-a", "namespace": "default"},
      "spec": {"domain": {"cpu": {"cores": 2, "model": "host-model"},
                          "memory": {"guest": "4Gi", "maxGuest": "16Gi"},
+                         "machine": {"type": "q35"},
                          "devices": {"gpus": [{"name": "a4000",
-                                               "deviceName": "nvidia.com/GA104GL_RTX_A4000"}]}},
+                                               "deviceName": "nvidia.com/GA104GL_RTX_A4000"}],
+                                     "interfaces": [{"name": "default", "masquerade": {}},
+                                                    {"name": "acme", "bridge": {}}],
+                                     "disks": [{"name": "rootdisk", "disk": {"bus": "virtio"}},
+                                               {"name": "cloudinit", "disk": {"bus": "virtio"}}]}},
               "networks": [{"name": "default", "pod": {}},
-                           {"name": "acme", "multus": {"networkName": "tenant-a"}}]},
+                           {"name": "acme", "multus": {"networkName": "tenant-a"}}],
+              "volumes": [{"name": "rootdisk", "containerDisk": {"image": "quay.io/example/fedora:latest"}},
+                          {"name": "cloudinit", "cloudInitNoCloud": {"userData": "#cloud-config"}}]},
      "status": {"phase": "Running", "nodeName": "worker-1",
-                "interfaces": [{"name": "default", "ipAddress": "203.0.113.82",
-                                "mac": "02:00:00:00:00:01", "linkState": "up"},
+                "interfaces": [{"name": "default", "ipAddress": "203.0.113.82", "ipAddresses": ["203.0.113.82"],
+                                "mac": "02:00:00:00:00:01", "linkState": "up", "queueCount": 1},
                                {"name": "acme", "ipAddress": "198.51.100.101",
-                                "mac": "02:00:00:00:00:02", "linkState": "up"}]}}
+                                "mac": "02:00:00:00:00:02", "linkState": "up"}],
+                "memory": {"guestAtBoot": "4Gi", "guestCurrent": "4Gi", "guestRequested": "4Gi"},
+                "machine": {"type": "q35"},
+                "launcherContainerImageVersion": "1.8.4",
+                "migrationMethod": "BlockMigration",
+                "conditions": [{"type": "Ready", "status": "True"},
+                               {"type": "LiveMigratable", "status": "False", "reason": "HostDeviceNotLiveMigratable"}],
+                "phaseTransitionTimestamps": [{"phase": "Scheduling", "phaseTransitionTimestamp": "2026-09-04T03:23:18Z"},
+                                              {"phase": "Running", "phaseTransitionTimestamp": "2026-09-04T03:23:32Z"}],
+                "volumeStatus": [{"name": "cloudinit", "size": 1048576, "target": "vdb"},
+                                 {"name": "rootdisk", "target": "vda"}]}}
     """
 }

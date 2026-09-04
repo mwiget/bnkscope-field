@@ -400,6 +400,39 @@ struct K0rdentTests {
 
 // MARK: - GPUs and KubeVirt
 
+@Suite("API discovery")
+struct APIDiscoveryTests {
+
+    @Test func mapsEachGroupToItsPreferredVersion() throws {
+        let json = """
+        {"groups": [{"name": "kubevirt.io", "preferredVersion": {"groupVersion": "kubevirt.io/v1"}},
+                    {"name": "k0rdent.mirantis.com",
+                     "preferredVersion": {"groupVersion": "k0rdent.mirantis.com/v1beta1"}},
+                    {"name": "nothing.example.com"}]}
+        """
+        let list = try KubeClient.decoder.decode(K8s.APIGroupList.self, from: Data(json.utf8))
+        let groups = KubeClient.preferredVersions(of: list)
+        #expect(groups["kubevirt.io"] == "kubevirt.io/v1")
+        #expect(groups["k0rdent.mirantis.com"] == "k0rdent.mirantis.com/v1beta1")
+        // A group with no preferred version is not a group anything can address.
+        #expect(groups["nothing.example.com"] == nil)
+    }
+
+    /// `/apis` is assembled by the apiserver out of whatever the aggregated
+    /// APIServices register, so a repeated group name is somebody else's bug —
+    /// and `Dictionary(uniqueKeysWithValues:)` answers it by trapping, from
+    /// inside a call every caller has wrapped in `try?` and believes is safe.
+    @Test func survivesAGroupThatIsListedTwice() throws {
+        let json = """
+        {"groups": [{"name": "kubevirt.io", "preferredVersion": {"groupVersion": "kubevirt.io/v1"}},
+                    {"name": "kubevirt.io",
+                     "preferredVersion": {"groupVersion": "kubevirt.io/v1alpha3"}}]}
+        """
+        let list = try KubeClient.decoder.decode(K8s.APIGroupList.self, from: Data(json.utf8))
+        #expect(KubeClient.preferredVersions(of: list) == ["kubevirt.io": "kubevirt.io/v1"])
+    }
+}
+
 @Suite("KubeVirt")
 struct KubeVirtTests {
 
@@ -479,6 +512,47 @@ struct KubeVirtTests {
         #expect(machine.state == "Stopped")
         #expect(machine.gpus.count == 1)
         #expect(machine.networks.map(\.described) == ["tenant-b"])
+    }
+
+    /// The declared state and the instance phase disagree exactly where the
+    /// buttons matter. A machine asked to run whose VMI cannot be placed —
+    /// every card already taken — has no instance running, and the verb it
+    /// needs is Stop. Keying the buttons on the phase offered it Start, which
+    /// the subresource API answers 409, and offered no way to stop it.
+    @Test func separatesTheDeclaredStateFromTheInstancePhase() throws {
+        let vmJSON = """
+        {"metadata": {"name": "gpu-1", "namespace": "default"},
+         "spec": {"running": true},
+         "status": {"printableStatus": "Starting"}}
+        """
+        let vmiJSON = """
+        {"metadata": {"name": "gpu-1", "namespace": "default"},
+         "status": {"phase": "Scheduling"}}
+        """
+        let vm = try KubeClient.decoder.decode(KubeVirt.VirtualMachine.self, from: Data(vmJSON.utf8))
+        let vmi = try KubeClient.decoder.decode(KubeVirt.VirtualMachineInstance.self, from: Data(vmiJSON.utf8))
+        let stuck = KubeVirt.Machine(namespace: "default", name: "gpu-1", vm: vm, vmi: vmi)
+        #expect(stuck.isRunning == false)     // nothing is up
+        #expect(stuck.isDeclaredRunning)      // and it was asked to be
+        #expect(stuck.state == "Scheduling")  // which is what the row says
+    }
+
+    /// A machine that is genuinely down is declared down, and a standalone VMI
+    /// has no declaration to read — it falls back to the instance rather than
+    /// claiming the machine is stopped.
+    @Test func readsTheDeclaredStateOffWhicheverObjectExists() throws {
+        let halted = """
+        {"metadata": {"name": "halted", "namespace": "default"},
+         "spec": {"runStrategy": "Halted"}, "status": {"printableStatus": "Stopped"}}
+        """
+        let vm = try KubeClient.decoder.decode(KubeVirt.VirtualMachine.self, from: Data(halted.utf8))
+        #expect(KubeVirt.Machine(namespace: "default", name: "halted", vm: vm, vmi: nil)
+                    .isDeclaredRunning == false)
+
+        let vmi = try KubeClient.decoder.decode(KubeVirt.VirtualMachineInstance.self,
+                                                from: Data(Self.vmiJSON.utf8))
+        #expect(KubeVirt.Machine(namespace: "default", name: "tenant-a", vm: nil, vmi: vmi)
+                    .isDeclaredRunning)
     }
 
     static let vmiJSON = """

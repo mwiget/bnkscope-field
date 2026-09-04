@@ -14,6 +14,9 @@ struct KubeVirtView: View {
             if store.current?.roles.contains(.kubevirt) != true {
                 Message(title: "KubeVirt is not installed here",
                         detail: "This screen appears on a cluster whose apiserver serves kubevirt.io.")
+            } else if let why = unreachable {
+                Message(title: "Cannot reach \(store.current?.displayName ?? "this cluster")",
+                        detail: why, tone: Theme.bad)
             } else if let failure = kubevirt.failure {
                 Message(title: "Could not read the KubeVirt API", detail: failure, tone: Theme.bad)
             } else if kubevirt.machines.isEmpty && !kubevirt.loading {
@@ -86,6 +89,21 @@ struct KubeVirtView: View {
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border))
     }
 
+    /// Why the cluster cannot be read at all, when that is the situation.
+    ///
+    /// A failed probe clears `apiGroups` but leaves `roles` behind, so this tab
+    /// stays on screen and `load` takes its "kubevirt.io is not served here"
+    /// exit — which empties the list. Without this the screen then reports no
+    /// virtual machines on a cluster nobody has heard from, which is a claim
+    /// about the cluster rather than about the connection. The reach is the one
+    /// fact that separates the two.
+    private var unreachable: String? {
+        switch store.current?.reach {
+        case .unreachable(let why), .unusable(let why): return why
+        default: return nil
+        }
+    }
+
     private func reload() async {
         guard let cluster = store.current, cluster.roles.contains(.kubevirt) else { return }
         await kubevirt.load(cluster: cluster)
@@ -145,16 +163,20 @@ private struct MachineRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.bg, in: RoundedRectangle(cornerRadius: 9))
         .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.border))
+        // `presenting:` hands the verb to the closures below rather than
+        // leaving them to read it back out of `confirming`. Dismissing an alert
+        // writes `false` through its own `isPresented` binding, and the setter
+        // here clears the verb — so a button action that re-read the state
+        // would find nil and send nothing, making Stop and Restart look like
+        // buttons that do nothing while Start, which skips the alert, works.
         .alert("\(confirming?.rawValue.capitalized ?? "") \(machine.name)?",
                isPresented: Binding(get: { confirming != nil },
-                                    set: { if !$0 { confirming = nil } })) {
-            Button("Cancel", role: .cancel) { confirming = nil }
-            Button(confirming?.rawValue.capitalized ?? "", role: .destructive) {
-                if let action = confirming { run(action) }
-                confirming = nil
-            }
-        } message: {
-            Text(confirming == .stop
+                                    set: { if !$0 { confirming = nil } }),
+               presenting: confirming) { action in
+            Button("Cancel", role: .cancel) { }
+            Button(action.rawValue.capitalized, role: .destructive) { run(action) }
+        } message: { action in
+            Text(action == .stop
                  ? "The machine is powered off. Anything running on it stops now, and its disks are "
                  + "kept — Start brings it back."
                  : "The machine is powered off and started again. Anything running on it stops now.")
@@ -167,7 +189,12 @@ private struct MachineRow: View {
             ProgressView().controlSize(.small)
         } else if machine.isManageable {
             HStack(spacing: 6) {
-                if machine.isRunning {
+                // Declared state, not the instance phase. A machine whose VMI
+                // is stuck at `Scheduling` because no node has a free card is
+                // declared running and is not running: keying on the phase
+                // offers it Start, which the subresource API answers 409, and
+                // withholds Stop, which is the verb that unsticks it.
+                if machine.isDeclaredRunning {
                     button("Restart", .restart)
                     button("Stop", .stop)
                 } else {

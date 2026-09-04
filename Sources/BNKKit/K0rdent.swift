@@ -154,7 +154,8 @@ extension KubeClient {
         // other order labels every management cluster as managed.
         if let groupVersion = groups[K0rdent.group] {
             let resources = (try? await apiResources(groupVersion: groupVersion)) ?? []
-            if resources.contains("managements"), let management = try? await k0rdentManagement(groupVersion) {
+            let servesManagements = resources.contains("managements")
+            if servesManagements, let management = try? await k0rdentManagement(groupVersion) {
                 found.role = .management
                 found.release = management.status?.release ?? management.spec?.release
 
@@ -174,6 +175,18 @@ extension KubeClient {
                     found.edition = resources.contains("licenses") ? .enterprise : .community
                 }
                 found.providers = management.status?.availableProviders ?? []
+                return found
+            }
+
+            // The group serves `managements` and the object did not come back:
+            // RBAC that forbids the read, or the aggregated API answering 500.
+            // Both arrive here as a silently swallowed `try?`, and falling
+            // through would run the managed test on a management cluster — the
+            // one thing the ordering above exists to prevent. Say what is known
+            // instead of guessing: this is a management cluster whose
+            // Management object could not be read.
+            if servesManagements {
+                found.role = .management
                 return found
             }
         }

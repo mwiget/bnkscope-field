@@ -16,23 +16,36 @@ final class KubeVirtEngine {
     /// The last action's complaint, kept next to the machine it was about.
     private(set) var actionFailure: (id: KubeVirt.Machine.ID, why: String)?
 
-    /// Which version of `kubevirt.io` this cluster serves. Held because every
-    /// request needs it and discovery already answered it during the probe.
-    private var groupVersion: String?
+    /// The cluster the contents above belong to.
+    ///
+    /// Every write below lands after an await, and the selection can change
+    /// while one is in flight. Without this an action's re-read repopulates the
+    /// list from the cluster it ran on while the screen is showing another —
+    /// and the next verb is then addressed by a name that came from the wrong
+    /// cluster, which on template-deployed clusters resolves to a real machine.
+    private var shown: ManagedCluster.ID?
 
     func load(cluster: ManagedCluster) async {
-        guard let client = try? cluster.client() else { return }
-        guard let version = cluster.apiGroups[KubeVirt.group] else {
+        shown = cluster.id
+        // Keyed on `namespace/name`, which repeats across clusters deployed
+        // from one template, so it cannot be allowed to outlive its cluster.
+        actionFailure = nil
+        guard let version = cluster.apiGroups[KubeVirt.group], let client = try? cluster.client() else {
             machines = []
             failure = nil
+            // A load that never started still owns the spinner, because an
+            // older one may be about to return early and leave it running.
+            loading = false
             return
         }
-        groupVersion = version
         loading = true
         failure = nil
         do {
-            machines = try await client.machines(groupVersion: version)
+            let read = try await client.machines(groupVersion: version)
+            guard shown == cluster.id else { return }
+            machines = read
         } catch {
+            guard shown == cluster.id else { return }
             machines = []
             failure = TelemetryEngine.brief(error)
         }
@@ -48,15 +61,19 @@ final class KubeVirtEngine {
     /// costs a second and makes the screen agree with the cluster.
     func perform(_ action: KubeVirt.Action, on machine: KubeVirt.Machine,
                  cluster: ManagedCluster) async {
-        guard let client = try? cluster.client(), let groupVersion else { return }
+        // Taken from the cluster being acted on rather than from a version this
+        // engine cached, which belongs to whichever cluster loaded last.
+        guard let groupVersion = cluster.apiGroups[KubeVirt.group],
+              let client = try? cluster.client() else { return }
         busy = machine.id
         actionFailure = nil
         do {
             try await client.perform(action, on: machine, groupVersion: groupVersion)
             try? await Task.sleep(for: .seconds(1.5))
-            machines = try await client.machines(groupVersion: groupVersion)
+            let read = try await client.machines(groupVersion: groupVersion)
+            if shown == cluster.id { machines = read }
         } catch {
-            actionFailure = (id: machine.id, why: TelemetryEngine.brief(error))
+            if shown == cluster.id { actionFailure = (id: machine.id, why: TelemetryEngine.brief(error)) }
         }
         busy = nil
     }

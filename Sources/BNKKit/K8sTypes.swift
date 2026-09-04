@@ -298,10 +298,21 @@ extension KubeClient {
     /// cluster and `v1alpha1` on a cluster that picked up a stray CRD from a
     /// service template, and a hard-coded path would 404 on one of them.
     public func apiGroups() async throws -> [String: String] {
-        let list = try await getJSON(K8s.APIGroupList.self, "/apis")
-        return Dictionary(uniqueKeysWithValues: list.groups.compactMap { group in
+        Self.preferredVersions(of: try await getJSON(K8s.APIGroupList.self, "/apis"))
+    }
+
+    /// The group→preferred-version map, split out so the duplicate case can be
+    /// tested without a cluster that misbehaves on demand.
+    ///
+    /// First one wins rather than `uniqueKeysWithValues`, which *traps* on a
+    /// repeated group name. The list is assembled by the apiserver out of
+    /// whatever the aggregated APIServices register, so a duplicate is somebody
+    /// else's bug — but it would take the app down from inside a call every
+    /// caller has wrapped in `try?` and believes is safe.
+    static func preferredVersions(of list: K8s.APIGroupList) -> [String: String] {
+        Dictionary(list.groups.compactMap { group in
             group.preferredVersion.map { (group.name, $0.groupVersion) }
-        })
+        }, uniquingKeysWith: { first, _ in first })
     }
 
     /// The plural resource names one group version serves.

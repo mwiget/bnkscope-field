@@ -170,7 +170,21 @@ public enum KubeVirt {
             return vm?.state ?? "Stopped"
         }
 
+        /// Whether an instance is up right now. Drives the status dot, where
+        /// "is it serving" is the question being asked.
         public var isRunning: Bool { vmi?.isRunning ?? false }
+
+        /// Whether the declaration asks for this machine to be up — which is
+        /// the state the lifecycle verbs act on, and not the same question.
+        ///
+        /// The two disagree exactly where it matters. A machine declared
+        /// running whose VMI cannot be placed sits at `Scheduling` with nothing
+        /// running; `Start` is rejected there and `Stop` is what is wanted. A
+        /// standalone VMI has no declaration at all, so it falls back to the
+        /// instance — it is never offered a verb anyway, `isManageable` sees to
+        /// that, but the answer should still describe the machine.
+        public var isDeclaredRunning: Bool { vm?.isRunning ?? (vmi != nil) }
+
         public var node: String? { vmi?.node }
         public var gpus: [VirtualMachineInstance.GPU] {
             vmi?.gpus ?? vm?.spec?.template?.spec?.domain?.devices?.gpus ?? []

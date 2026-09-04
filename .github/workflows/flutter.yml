@@ -1,0 +1,315 @@
+# Builds the Flutter app for every platform it ships on, from one tag.
+#
+# Cost note, the same one macos.yml carries: macOS runners bill at ten times
+# the Linux rate and Windows at twice, so the cheap jobs run on every push to
+# the port branch while the Apple job runs only on main or by hand. Nothing
+# builds on pull requests.
+#
+# Signing is by presence of secrets. A job whose secrets are missing still
+# builds, unsigned or debug-signed, and says so in its summary; only the
+# Apple job fails hard, because an unsigned Mac app is one nobody can open.
+name: Flutter app
+
+on:
+  push:
+    branches: [main, flutter-port]
+    paths:
+      - dart/**
+      - .github/workflows/flutter.yml
+      - .github/release-notes-flutter.md
+  workflow_dispatch:
+
+permissions:
+  contents: write          # to create the release and upload the builds to it
+
+concurrency:
+  group: flutter-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: 3.47.2
+
+jobs:
+  # Every Dart and Flutter test, on the cheapest runner. The two packages
+  # need no Flutter at all; the widget tests run headless.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Resolve the workspace
+        run: cd dart && flutter pub get
+      - name: Analyze
+        run: cd dart && dart analyze --fatal-infos
+      - name: Test the transport and the engines
+        run: |
+          cd dart/bnk_kit && dart test
+          cd ../bnk_engines && dart test
+      - name: Test the app
+        run: cd dart/bnkscope_field && flutter test
+
+  android:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Resolve the workspace
+        run: cd dart && flutter pub get
+      # A keystore is what makes one build upgradeable by the next: two APKs
+      # signed with different keys cannot replace each other. Generate one
+      # once, keep it forever, and put it in the secrets as base64.
+      - name: Release keystore
+        if: ${{ env.ANDROID_KEYSTORE != '' }}
+        env:
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+        run: |
+          echo "$ANDROID_KEYSTORE" | base64 --decode > dart/bnkscope_field/android/release.jks
+          cat > dart/bnkscope_field/android/key.properties <<EOF
+          storeFile=release.jks
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          EOF
+          echo "signed with the release keystore" >> "$GITHUB_STEP_SUMMARY"
+      - name: Note the missing keystore
+        if: ${{ env.ANDROID_KEYSTORE == '' }}
+        env:
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+        run: |
+          echo "no ANDROID_KEYSTORE secret: the APK is signed with the debug key and will not upgrade a release-signed install" >> "$GITHUB_STEP_SUMMARY"
+      - name: Build
+        run: |
+          cd dart/bnkscope_field
+          flutter build apk --release
+          flutter build appbundle --release
+          mv build/app/outputs/flutter-apk/app-release.apk bnkscope-Field-android.apk
+          mv build/app/outputs/bundle/release/app-release.aab bnkscope-Field-android.aab
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: |
+            dart/bnkscope_field/bnkscope-Field-android.apk
+            dart/bnkscope_field/bnkscope-Field-android.aab
+          if-no-files-found: error
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Resolve the workspace
+        run: cd dart; flutter pub get
+      - name: Build
+        run: cd dart/bnkscope_field; flutter build windows --release
+      # Authenticode. Without a certificate the app runs, but SmartScreen
+      # warns on first launch until enough machines have run it; a standard
+      # code-signing certificate quiets that over time, an EV one at once.
+      - name: Sign
+        if: ${{ env.WINDOWS_CERTIFICATE != '' }}
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        shell: pwsh
+        run: |
+          $pfx = "$env:RUNNER_TEMP\signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match "x64" } | Select-Object -Last 1 -ExpandProperty FullName
+          & $signtool sign /f $pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+            "dart\bnkscope_field\build\windows\x64\runner\Release\bnkscope_field.exe"
+          Remove-Item $pfx
+          "signed with the Authenticode certificate" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+      - name: Note the missing certificate
+        if: ${{ env.WINDOWS_CERTIFICATE == '' }}
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+        shell: pwsh
+        run: '"no WINDOWS_CERTIFICATE secret: the build is unsigned and SmartScreen will warn on first launch" | Out-File -Append $env:GITHUB_STEP_SUMMARY'
+      - name: Package
+        shell: pwsh
+        run: Compress-Archive -Path "dart\bnkscope_field\build\windows\x64\runner\Release\*" -DestinationPath "bnkscope-Field-windows.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: bnkscope-Field-windows.zip
+          if-no-files-found: error
+
+  # macOS and iPadOS together: one expensive runner, one Xcode selection.
+  # Only on main or by hand, for the cost reason at the top.
+  apple:
+    needs: test
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Use the newest Xcode on the runner
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          xcodebuild -version
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Resolve the workspace
+        run: cd dart && flutter pub get
+
+      - name: Build for macOS
+        run: cd dart/bnkscope_field && flutter build macos --release
+
+      # Signed with Developer ID and notarized, the same six secrets and the
+      # same steps as macos.yml. A Flutter app carries nested code, the
+      # engine and the plugins, so those are signed first and the bundle
+      # last; --deep is deprecated and gets the order wrong for entitlements.
+      - name: Sign and notarize the Mac app
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          APP="dart/bnkscope_field/build/macos/Build/Products/Release/bnkscope Field.app"
+          ENTITLEMENTS="dart/bnkscope_field/macos/Runner/Release.entitlements"
+
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$KEYCHAIN" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+
+          Tools/sign-flutter-mac-app.sh "$APP" "$SIGNING_IDENTITY" "$ENTITLEMENTS"
+
+          echo "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "$RUNNER_TEMP/notarize.zip"
+          set +e
+          RESULT=$(xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
+            --wait --timeout 30m --output-format json)
+          STATUS=$?
+          set -e
+          echo "$RESULT"
+          SUBMISSION=$(echo "$RESULT" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))' || true)
+          VERDICT=$(echo "$RESULT" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))' || true)
+          if [ "$VERDICT" != "Accepted" ] || [ "$STATUS" -ne 0 ]; then
+            echo "notarization did not succeed: $VERDICT"
+            [ -n "$SUBMISSION" ] && xcrun notarytool log "$SUBMISSION" \
+              --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" || true
+            rm -f "$RUNNER_TEMP/notary.p8"
+            exit 1
+          fi
+          rm -f "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/notarize.zip"
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+          # The one check that speaks for a downloader's Mac rather than ours.
+          spctl --assess --type execute -vvv "$APP" 2>&1 | tee /tmp/spctl.txt
+          grep -q "source=Notarized Developer ID" /tmp/spctl.txt
+          ditto -c -k --sequesterRsrc --keepParent "$APP" bnkscope-Field-macOS.zip
+
+      # iPadOS cannot be sideloaded, so the build goes to TestFlight, and it
+      # needs three things the Mac build does not: an Apple Distribution
+      # certificate, a provisioning profile for the bundle id, and the team.
+      # Without them the target is still compiled, unsigned, so a change that
+      # breaks the iOS build is caught here rather than on the day of the
+      # first TestFlight.
+      - name: Build for iPadOS
+        env:
+          IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          cd dart/bnkscope_field
+          if [ -z "$IOS_CERTIFICATE" ] || [ -z "$IOS_PROVISIONING_PROFILE" ] || [ -z "$APPLE_TEAM_ID" ]; then
+            flutter build ios --release --no-codesign
+            echo "iPadOS: compiled but not signed or uploaded; set IOS_CERTIFICATE, IOS_CERTIFICATE_PASSWORD, IOS_PROVISIONING_PROFILE and APPLE_TEAM_ID for TestFlight" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          echo "$IOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/ios.p12"
+          security import "$RUNNER_TEMP/ios.p12" -k "$KEYCHAIN" -P "$IOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/ios.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$(uuidgen)" "$KEYCHAIN" > /dev/null || true
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo "$IOS_PROVISIONING_PROFILE" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/field.mobileprovision
+          PROFILE_NAME=$(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/field.mobileprovision | plutil -extract Name raw -)
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>$APPLE_TEAM_ID</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>provisioningProfiles</key><dict>
+              <key>com.mwiget.bnkscope.bnkscopeField</key><string>$PROFILE_NAME</string>
+            </dict>
+          </dict></plist>
+          EOF
+          flutter build ipa --release --export-options-plist "$RUNNER_TEMP/ExportOptions.plist"
+          IPA=$(ls build/ios/ipa/*.ipa | head -1)
+          cp "$IPA" ../../bnkscope-Field-iPadOS.ipa
+          mkdir -p ~/private_keys
+          echo "$NOTARY_KEY" | base64 --decode > ~/private_keys/AuthKey_$NOTARY_KEY_ID.p8
+          xcrun altool --upload-app -f "$IPA" -t ios --apiKey "$NOTARY_KEY_ID" --apiIssuer "$NOTARY_ISSUER_ID"
+          rm -f ~/private_keys/AuthKey_$NOTARY_KEY_ID.p8
+          echo "iPadOS: uploaded to TestFlight" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apple
+          path: |
+            bnkscope-Field-macOS.zip
+            bnkscope-Field-iPadOS.ipa
+          if-no-files-found: error
+
+  # One release with every platform's build, on main only, tagged from the
+  # app's own version and the run number so every push is downloadable.
+  release:
+    needs: [android, windows, apple]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: builds
+          merge-multiple: true
+      - name: Tag
+        id: tag
+        run: |
+          VERSION=$(grep -m1 '^version:' dart/bnkscope_field/pubspec.yaml | awk '{print $2}' | cut -d+ -f1)
+          echo "tag=app-v${VERSION}-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la builds
+          gh release create "${{ steps.tag.outputs.tag }}" builds/* \
+            --title "bnkscope Field — ${{ steps.tag.outputs.tag }}" \
+            --target "$GITHUB_SHA" \
+            --notes-file .github/release-notes-flutter.md

@@ -186,6 +186,21 @@ that way; `#if os(...)` elsewhere is a smell.
 
 ## CI
 
+Two workflows. `.github/workflows/flutter.yml` is the matrix for the Dart
+port: a Linux `test` job (both packages and the widget tests, with
+`dart analyze --fatal-infos`), then `android` (Linux; APK and AAB, release
+keystore from `ANDROID_KEYSTORE` + password, alias and key password, debug
+key otherwise), `windows` (Windows runner; zip of the Release folder, signed
+with `WINDOWS_CERTIFICATE` + password when present), and `apple` (macOS
+runner, **main or `workflow_dispatch` only**: Developer ID signing through
+`Tools/sign-flutter-mac-app.sh`, which signs nested frameworks before the
+bundle, then notarize, staple and `spctl`; iPadOS is compiled unsigned unless
+`IOS_CERTIFICATE`, `IOS_CERTIFICATE_PASSWORD`, `IOS_PROVISIONING_PROFILE`
+and `APPLE_TEAM_ID` exist, in which case the `.ipa` goes to TestFlight with
+the notary key). On `main`, `release` attaches every build to a release
+tagged `app-v<pubspec version>-<run>`. The cheap jobs also run on pushes to
+`flutter-port`. The sign script can be dry-run locally with identity `-`.
+
 `.github/workflows/macos.yml` — every merge to `main` tests (both
 configurations), builds universal, signs with Developer ID, notarizes, staples
 and publishes a release. macOS runners bill at 10× the Linux rate, so **nothing

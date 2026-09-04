@@ -318,3 +318,181 @@ struct ArgvTests {
         }
     }
 }
+
+// MARK: - k0rdent detection
+
+@Suite("k0rdent")
+struct K0rdentTests {
+
+    /// The Sveltos agent's flags are the only place a managed cluster says who
+    /// manages it, so parsing them has to survive their exact shape.
+    @Test func readsTheSveltosAgentFlags() {
+        let args = ["--diagnostics-address=:8443", "--v=0",
+                    "--cluster-namespace=kcm-system", "--cluster-name=example-cluster",
+                    "--cluster-type=Capi", "--current-cluster=managed-cluster"]
+        #expect(KubeClient.flag("--cluster-namespace", in: args) == "kcm-system")
+        #expect(KubeClient.flag("--cluster-name", in: args) == "example-cluster")
+        #expect(KubeClient.flag("--cluster-type", in: args) == "Capi")
+        #expect(KubeClient.flag("--missing", in: args) == nil)
+        // A prefix that is not the whole flag name must not match:
+        // --cluster-name is not --cluster-namespace.
+        #expect(KubeClient.flag("--cluster", in: args) == nil)
+    }
+
+    /// A deployment is what the flags are read from, not a pod — pod names churn.
+    @Test func readsArgsOffADeployment() throws {
+        let json = """
+        {"metadata": {"name": "sveltos-agent-manager", "namespace": "projectsveltos"},
+         "spec": {"replicas": 1, "template": {"spec": {"containers": [
+           {"name": "manager", "image": "projectsveltos/sveltos-agent:v1.12.0",
+            "args": ["--cluster-name=example-cluster", "--current-cluster=managed-cluster"]}]}}}}
+        """
+        let deployment = try KubeClient.decoder.decode(K8s.Deployment.self, from: Data(json.utf8))
+        #expect(deployment.podArgs.contains("--current-cluster=managed-cluster"))
+    }
+
+    /// Enterprise and community differ in the chart name and nothing else.
+    @Test func tellsTheEditionsApartByChartName() throws {
+        let json = """
+        {"items": [{"metadata": {"name": "k0rdent-enterprise-2-1-0-rc1-2"},
+                    "spec": {"version": "2.1.0-rc1.2",
+                             "kcm": {"template": "k0rdent-enterprise-2-1-0-rc1-2"},
+                             "providers": [{"template": "projectsveltos-1-12-1"}]}}]}
+        """
+        let list = try KubeClient.decoder.decode(K8s.List<K0rdent.Release>.self, from: Data(json.utf8))
+        let release = try #require(list.items.first)
+        #expect(release.spec?.version == "2.1.0-rc1.2")
+        #expect(release.spec?.kcm?.template?.hasPrefix("k0rdent-enterprise") == true)
+    }
+
+    @Test func decodesTheManagementSingleton() throws {
+        let json = """
+        {"metadata": {"name": "kcm"},
+         "spec": {"release": "k0rdent-enterprise-2-1-0-rc1-2"},
+         "status": {"release": "k0rdent-enterprise-2-1-0-rc1-2",
+                    "availableProviders": ["infrastructure-nico", "infrastructure-internal"],
+                    "conditions": [{"type": "Ready", "status": "True"}]}}
+        """
+        let management = try KubeClient.decoder.decode(K0rdent.Management.self, from: Data(json.utf8))
+        #expect(management.isReady)
+        #expect(management.status?.availableProviders?.contains("infrastructure-nico") == true)
+    }
+
+    /// Discovery has to answer the version, because it is not the same one on
+    /// every cluster: a management cluster serves v1beta1, and a cluster that
+    /// picked up one stray k0rdent CRD from a service template serves v1alpha1.
+    @Test func readsPreferredVersionsFromDiscovery() throws {
+        let json = """
+        {"groups": [
+          {"name": "k0rdent.mirantis.com", "preferredVersion": {"groupVersion": "k0rdent.mirantis.com/v1beta1"}},
+          {"name": "kubevirt.io", "preferredVersion": {"groupVersion": "kubevirt.io/v1"}},
+          {"name": "nothing.example.com"}]}
+        """
+        let list = try KubeClient.decoder.decode(K8s.APIGroupList.self, from: Data(json.utf8))
+        let map = Dictionary(uniqueKeysWithValues: list.groups.compactMap { group in
+            group.preferredVersion.map { (group.name, $0.groupVersion) }
+        })
+        #expect(map[K0rdent.group] == "k0rdent.mirantis.com/v1beta1")
+        #expect(map[KubeVirt.group] == "kubevirt.io/v1")
+        #expect(map["nothing.example.com"] == nil)
+    }
+}
+
+// MARK: - GPUs and KubeVirt
+
+@Suite("KubeVirt")
+struct KubeVirtTests {
+
+    /// KubeVirt advertises one extended resource per passable device, named
+    /// after the device; the GPU Operator advertises `nvidia.com/gpu`. Both
+    /// have to count, and nothing else on the node may.
+    @Test func countsGPUsUnderEitherNamingScheme() throws {
+        let json = """
+        {"metadata": {"name": "worker-1"},
+         "status": {"allocatable": {"cpu": "48", "memory": "65536000Ki",
+                                    "devices.kubevirt.io/kvm": "1k",
+                                    "nvidia.com/GA104GL_RTX_A4000": "2",
+                                    "nvidia.com/gpu": "0"}}}
+        """
+        let node = try KubeClient.decoder.decode(K8s.Node.self, from: Data(json.utf8))
+        let gpus = node.gpuResources
+        // The zero-count resource is advertised but is not a GPU anyone can have.
+        #expect(gpus.count == 1)
+        #expect(gpus.first?.name == "GA104GL_RTX_A4000")
+        #expect(gpus.first?.count == 2)
+    }
+
+    /// A BlueField DPU cluster advertises its scalable functions under the same
+    /// vendor prefix a GPU uses. They are NICs. Counting them reported
+    /// twenty-six GPUs on a cluster that has none.
+    @Test func doesNotMistakeBlueFieldFunctionsForGPUs() throws {
+        let json = """
+        {"metadata": {"name": "dpu-node-1"},
+         "status": {"allocatable": {"cpu": "14",
+                                    "nvidia.com/bf_sf": "26",
+                                    "nvidia.com/bf_sf_trusted": "12"}}}
+        """
+        let node = try KubeClient.decoder.decode(K8s.Node.self, from: Data(json.utf8))
+        #expect(node.gpuResources.isEmpty)
+    }
+
+    @Test func decodesARunningInstanceWithAPassedThroughCard() throws {
+        let vmi = try KubeClient.decoder.decode(KubeVirt.VirtualMachineInstance.self,
+                                                from: Data(Self.vmiJSON.utf8))
+        #expect(vmi.isRunning)
+        #expect(vmi.node == "worker-1")
+        #expect(vmi.size == "2 vCPU · 4Gi")
+        #expect(vmi.gpus.first?.deviceName == "nvidia.com/GA104GL_RTX_A4000")
+        // Both addresses, in interface order — the second is the one that
+        // carries the tenancy, and reporting only the first hides it.
+        #expect(vmi.addresses.map(\.ip) == ["203.0.113.82", "198.51.100.101"])
+        #expect(vmi.spec?.networks?.map(\.described) == ["pod", "tenant-a"])
+    }
+
+    /// A VMI applied without a VirtualMachine is legal, runs, and cannot be
+    /// started or stopped. Pairing on the owner reference would drop it
+    /// entirely; pairing on the name keeps it and marks it unmanageable.
+    @Test func keepsAnInstanceThatHasNoVirtualMachine() throws {
+        let vmi = try KubeClient.decoder.decode(KubeVirt.VirtualMachineInstance.self,
+                                                from: Data(Self.vmiJSON.utf8))
+        let standalone = KubeVirt.Machine(namespace: "default", name: "tenant-a", vm: nil, vmi: vmi)
+        #expect(standalone.isManageable == false)
+        #expect(standalone.isRunning)
+        #expect(standalone.state == "Running")
+    }
+
+    /// A stopped VirtualMachine has no instance at all, so every fact about it
+    /// has to come off the template instead.
+    @Test func readsAStoppedMachineOffItsTemplate() throws {
+        let json = """
+        {"metadata": {"name": "halted", "namespace": "default"},
+         "spec": {"runStrategy": "Halted",
+                  "template": {"spec": {"domain": {"devices": {"gpus": [
+                      {"name": "a4000", "deviceName": "nvidia.com/GA104GL_RTX_A4000"}]}},
+                    "networks": [{"name": "seg", "multus": {"networkName": "tenant-b"}}]}}},
+         "status": {"printableStatus": "Stopped"}}
+        """
+        let vm = try KubeClient.decoder.decode(KubeVirt.VirtualMachine.self, from: Data(json.utf8))
+        let machine = KubeVirt.Machine(namespace: "default", name: "halted", vm: vm, vmi: nil)
+        #expect(machine.isManageable)
+        #expect(machine.isRunning == false)
+        #expect(machine.state == "Stopped")
+        #expect(machine.gpus.count == 1)
+        #expect(machine.networks.map(\.described) == ["tenant-b"])
+    }
+
+    static let vmiJSON = """
+    {"metadata": {"name": "tenant-a", "namespace": "default"},
+     "spec": {"domain": {"cpu": {"cores": 2, "model": "host-model"},
+                         "memory": {"guest": "4Gi", "maxGuest": "16Gi"},
+                         "devices": {"gpus": [{"name": "a4000",
+                                               "deviceName": "nvidia.com/GA104GL_RTX_A4000"}]}},
+              "networks": [{"name": "default", "pod": {}},
+                           {"name": "acme", "multus": {"networkName": "tenant-a"}}]},
+     "status": {"phase": "Running", "nodeName": "worker-1",
+                "interfaces": [{"name": "default", "ipAddress": "203.0.113.82",
+                                "mac": "02:00:00:00:00:01", "linkState": "up"},
+                               {"name": "acme", "ipAddress": "198.51.100.101",
+                                "mac": "02:00:00:00:00:02", "linkState": "up"}]}}
+    """
+}

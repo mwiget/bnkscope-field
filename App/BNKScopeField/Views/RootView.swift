@@ -8,6 +8,7 @@ enum Section: String, CaseIterable, Identifiable {
     case logs = "Logs"
     case dpu = "DPU Services"
     case nico = "NICo"
+    case kubevirt = "KubeVirt"
     case terminal = "Terminal"
 
     var id: String { rawValue }
@@ -21,6 +22,7 @@ enum Section: String, CaseIterable, Identifiable {
         case .logs: return "text.alignleft"
         case .dpu: return "point.3.connected.trianglepath.dotted"
         case .nico: return "network"
+        case .kubevirt: return "macwindow.on.rectangle"
         case .terminal: return "apple.terminal"
         }
     }
@@ -71,6 +73,7 @@ struct RootView: View {
                 case .logs:                LogsView(columns: $columns)
                 case .dpu:                 DPUView(columns: $columns)
                 case .nico:                NICoView(columns: $columns)
+                case .kubevirt:            KubeVirtView(columns: $columns)
                 case .terminal:            TerminalView(columns: $columns)
                 case .overview:            OverviewView(columns: $columns)
                 case .clusters:            ClustersView(columns: $columns)
@@ -94,14 +97,16 @@ private struct Sidebar: View {
     @Environment(ClusterStore.self) private var store
     @Binding var section: Section
 
-    /// NICo appears only on a cluster running it — the same shape as bnkscope's
-    /// tab, and better than a screen that is permanently empty on most clusters.
+    /// NICo, DPU and KubeVirt appear only on a cluster running them — the same
+    /// shape as bnkscope's tab, and better than a screen that is permanently
+    /// empty on most clusters.
     private var visibleSections: [Section] {
         Section.allCases.filter { section in
             switch section {
-            case .nico: store.current?.roles.contains(.nico) == true
-            case .dpu:  store.current?.roles.contains(.dpu) == true
-            default:    true
+            case .nico:     store.current?.roles.contains(.nico) == true
+            case .dpu:      store.current?.roles.contains(.dpu) == true
+            case .kubevirt: store.current?.roles.contains(.kubevirt) == true
+            default:        true
             }
         }
     }
@@ -208,12 +213,14 @@ private struct ClusterRow: View {
             if !cluster.roles.isEmpty {
                 HStack(spacing: 5) {
                     ForEach(cluster.roles.sorted(), id: \.self) { role in
-                        Text(role.rawValue)
-                            .font(.system(size: 10, weight: .semibold)).kerning(0.4)
-                            .foregroundStyle(Theme.muted)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(Theme.mutedBg, in: RoundedRectangle(cornerRadius: 4))
-                            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Theme.border))
+                        tag(role.rawValue)
+                    }
+                    // Which k0rdent, alongside the fact of it. The distinction
+                    // costs a badge and decides whether half the catalog — and
+                    // the licence the cluster wants — is even available.
+                    if let edition = cluster.k0rdent.edition, cluster.k0rdent.role == .management {
+                        tag(edition == .enterprise ? "Enterprise" : "Community",
+                            tone: edition == .enterprise ? Theme.ember : Theme.muted)
                     }
                 }
                 .padding(.leading, 15)
@@ -224,6 +231,17 @@ private struct ClusterRow: View {
         .background(selected ? Theme.secondary : .clear, in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(selected ? Theme.border : .clear))
         .contentShape(Rectangle())
+    }
+
+    private func tag(_ text: String, tone: Color = Theme.muted) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .semibold)).kerning(0.4)
+            .foregroundStyle(tone)
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .background(tone == Theme.muted ? Theme.mutedBg : tone.opacity(0.1),
+                        in: RoundedRectangle(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: 4)
+                .strokeBorder(tone == Theme.muted ? Theme.border : tone.opacity(0.25)))
     }
 
     private var reachable: Bool {

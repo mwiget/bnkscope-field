@@ -51,6 +51,10 @@ public enum K8s {
         public struct Container: Decodable, Sendable {
             public let name: String
             public let image: String?
+            /// Read because an operator frequently says what it is for only
+            /// here. The Sveltos agent names the k0rdent object it reports for
+            /// in its own flags and nowhere else on the cluster.
+            public let args: [String]?
         }
         public struct Status: Decodable, Sendable {
             public let phase: String?
@@ -182,6 +186,10 @@ public enum K8s {
         public struct Status: Decodable, Sendable {
             public let nodeInfo: NodeInfo?
             public let conditions: [Condition]?
+            /// Quantities as strings — `"2"`, `"64Gi"`. Only the extended
+            /// resources are read here and those are always whole numbers, so
+            /// nothing parses the suffix form.
+            public let allocatable: [String: String]?
         }
         public struct NodeInfo: Decodable, Sendable {
             public let architecture: String?
@@ -190,6 +198,80 @@ public enum K8s {
         }
 
         public var isReady: Bool { K8s.isReady(status?.conditions) }
+
+        /// Extended resources this node offers for GPUs, as name and count.
+        ///
+        /// Two naming schemes turn up and they mean different things. The GPU
+        /// Operator advertises `nvidia.com/gpu` for containers; KubeVirt
+        /// advertises one resource per PCI device it is permitted to pass
+        /// through, named after the device — `nvidia.com/GA104GL_RTX_A4000`.
+        /// A k0rdent cluster only ever has the second: the catalog ships no GPU
+        /// Operator, and the only GPU components anywhere in it belong to
+        /// KubeVirt. So the vendor prefix has to be matched rather than either
+        /// exact name, since the device half is whatever the card is called.
+        ///
+        /// Which is why the exclusions exist. `nvidia.com/` is a vendor, not a
+        /// product line: a BlueField DPU cluster advertises `nvidia.com/bf_sf`
+        /// and `nvidia.com/bf_sf_trusted` — scalable functions, which are NICs.
+        /// Counting those reported twenty-six GPUs on a cluster that has none.
+        /// The list is by name shape because there is nothing in the node
+        /// status that says what kind of device a resource is.
+        public var gpuResources: [(name: String, count: Int)] {
+            (status?.allocatable ?? [:])
+                .filter { $0.key.hasPrefix("nvidia.com/") || $0.key.hasPrefix("amd.com/") }
+                .compactMap { key, value in
+                    let device = String(key.split(separator: "/").last ?? "")
+                    guard !Self.notAGPU.contains(where: { device.hasPrefix($0) }),
+                          let count = Int(value), count > 0 else { return nil }
+                    return (name: device, count: count)
+                }
+                .sorted { $0.name < $1.name }
+        }
+
+        /// Device names under a GPU vendor's prefix that are not GPUs:
+        /// BlueField scalable functions and virtual functions, and the generic
+        /// passthrough resource the SR-IOV device plugin uses for NICs.
+        static let notAGPU = ["bf_sf", "bf_vf", "hostdev", "mlnx", "sriov"]
+    }
+
+    /// Just enough of a Deployment to read what its pods are launched with.
+    public struct Deployment: Decodable, Sendable {
+        public let metadata: ObjectMeta
+        public let spec: Spec?
+
+        public struct Spec: Decodable, Sendable {
+            public let replicas: Int?
+            public let template: PodTemplate?
+        }
+        public struct PodTemplate: Decodable, Sendable {
+            public let spec: Pod.Spec?
+        }
+
+        /// The flags of the first container, which for a single-purpose
+        /// operator is the only container.
+        public var podArgs: [String] { spec?.template?.spec?.containers.first?.args ?? [] }
+    }
+
+    /// `/apis` — which API groups this server serves, and at which version.
+    public struct APIGroupList: Decodable, Sendable {
+        public let groups: [Group]
+
+        public struct Group: Decodable, Sendable {
+            public let name: String
+            public let preferredVersion: Version?
+        }
+        public struct Version: Decodable, Sendable {
+            public let groupVersion: String
+        }
+    }
+
+    /// `/apis/<group>/<version>` — which kinds that group serves.
+    public struct APIResourceList: Decodable, Sendable {
+        public let resources: [Resource]
+
+        public struct Resource: Decodable, Sendable {
+            public let name: String
+        }
     }
 }
 
@@ -204,6 +286,36 @@ extension KubeClient {
 
     public func secret(namespace: String, name: String) async throws -> K8s.Secret {
         try await getJSON(K8s.Secret.self, "/api/v1/namespaces/\(namespace)/secrets/\(name)")
+    }
+
+    /// Every API group the server serves, mapped to its preferred version —
+    /// `"kubevirt.io": "kubevirt.io/v1"`.
+    ///
+    /// One request that answers "is this thing installed" for every operator at
+    /// once, which is why detection asks for it first and passes the result
+    /// around rather than probing each group separately. It also removes the
+    /// need to guess a version: k0rdent serves `v1beta1` on a management
+    /// cluster and `v1alpha1` on a cluster that picked up a stray CRD from a
+    /// service template, and a hard-coded path would 404 on one of them.
+    public func apiGroups() async throws -> [String: String] {
+        let list = try await getJSON(K8s.APIGroupList.self, "/apis")
+        return Dictionary(uniqueKeysWithValues: list.groups.compactMap { group in
+            group.preferredVersion.map { (group.name, $0.groupVersion) }
+        })
+    }
+
+    /// The plural resource names one group version serves.
+    ///
+    /// Distinguishes a group that is fully installed from one represented by a
+    /// single stray CRD, and is the cheapest way to see an API that exists but
+    /// holds no objects — `licenses` on a k0rdent Enterprise cluster that has
+    /// not been given its licence yet.
+    public func apiResources(groupVersion: String) async throws -> Set<String> {
+        Set(try await getJSON(K8s.APIResourceList.self, "/apis/\(groupVersion)").resources.map(\.name))
+    }
+
+    public func deployment(namespace: String, name: String) async throws -> K8s.Deployment {
+        try await getJSON(K8s.Deployment.self, "/apis/apps/v1/namespaces/\(namespace)/deployments/\(name)")
     }
 
     /// Kamaji's tenant control planes, cluster-wide.

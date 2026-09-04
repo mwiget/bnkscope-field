@@ -200,18 +200,61 @@ private struct ClusterCard: View {
         case .unusable(let why), .unreachable(let why): return why
         case .reachable(let v, _, _):
             let tmm = cluster.tmmPods.count
-            return tmm > 0
+            let base = tmm > 0
                 ? "Kubernetes \(v). \(tmm) f5-tmm pod\(tmm == 1 ? "" : "s") found by label, of which \(cluster.tmmPods.filter { $0.has(container: "tmm-stat-exporter") }.count) carry the exporter."
                 : "Kubernetes \(v). No f5-tmm pods here, so there is nothing for TMM Live to scrape."
+            return ([base] + Self.k0rdentNotes(cluster)).joined(separator: " ")
         case .unprobed: return nil
         }
     }
 
+    /// What the k0rdent, GPU and KubeVirt probes found, as sentences.
+    ///
+    /// Written out rather than left to the badges because the badges say a
+    /// cluster is managed and cannot say by what: the ClusterDeployment's
+    /// namespace and name are the thread back to the management cluster, and
+    /// they are the first thing anyone asks for.
+    private static func k0rdentNotes(_ cluster: ManagedCluster) -> [String] {
+        var notes: [String] = []
+        switch cluster.k0rdent.role {
+        case .management:
+            let edition = cluster.k0rdent.edition == .enterprise ? "Enterprise" : "Community"
+            let version = cluster.k0rdent.version.map { " \($0)" } ?? ""
+            let providers = cluster.k0rdent.providers
+                .filter { $0.hasPrefix("infrastructure-") }
+                .map { String($0.dropFirst("infrastructure-".count)) }
+            notes.append("k0rdent \(edition)\(version) management cluster"
+                + (providers.isEmpty ? "." : ", providing \(providers.joined(separator: ", "))."))
+        case .managed:
+            if let by = cluster.k0rdent.managedBy {
+                notes.append("Managed by k0rdent as \(by.namespace)/\(by.name)"
+                    + (by.clusterType == "Capi" ? ", provisioned by it." : ", adopted."))
+            } else {
+                notes.append("Managed by k0rdent.")
+            }
+        case nil:
+            break
+        }
+        if !cluster.gpuDevices.isEmpty {
+            notes.append("GPUs: \(cluster.gpuDevices.joined(separator: ", ")).")
+        }
+        if cluster.roles.contains(.kubevirt) {
+            notes.append("KubeVirt is installed — see the KubeVirt tab.")
+        }
+        return notes
+    }
+
     private func roleColor(_ role: ManagedCluster.Role) -> Color {
         switch role {
-        case .bnk:  return Theme.series[0]
-        case .dpu:  return Theme.series[1]
-        case .nico: return Theme.series[2]
+        case .bnk:      return Theme.series[0]
+        case .dpu:      return Theme.series[1]
+        case .nico:     return Theme.series[2]
+        case .k0rdent:  return Theme.series[3]
+        // The same hue as k0rdent, because it is the same fact seen from the
+        // other end: this cluster belongs to one of those.
+        case .managed:  return Theme.series[3]
+        case .kubevirt: return Theme.series[4]
+        case .gpu:      return Theme.ember
         }
     }
 }

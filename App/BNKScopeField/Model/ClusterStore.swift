@@ -45,6 +45,15 @@ final class ManagedCluster: Identifiable {
     var reach: Reach = .unprobed
     var roles: Set<Role> = []
     var tmmPods: [K8s.Pod] = []
+    /// What k0rdent this cluster is, if any — edition, version, and the object
+    /// it is managed as. Empty on a cluster k0rdent has never touched.
+    var k0rdent = K0rdent.Fingerprint()
+    /// The API group versions discovery reported, so a screen can address an
+    /// operator's API without guessing which version it serves.
+    var apiGroups: [String: String] = [:]
+    /// GPU extended resources offered across the nodes, already summed —
+    /// `["GA104GL_RTX_A4000 ×2"]`.
+    var gpuDevices: [String] = []
     /// Bumped every time probing finishes.
     ///
     /// A screen that loads from what probing discovered cannot key its work on
@@ -54,8 +63,22 @@ final class ManagedCluster: Identifiable {
     /// event from "the selection changed".
     private(set) var probeGeneration = 0
 
+    /// What a cluster has on it, as the sidebar badges it.
+    ///
+    /// Not a taxonomy — a cluster is frequently several of these at once, and
+    /// the useful reading is the combination. A `.managed` cluster that is also
+    /// `.gpu` and `.kubevirt` is the one running tenant VMs on passed-through
+    /// cards, which is the thing worth finding in a list.
     enum Role: String, CaseIterable, Comparable {
         case bnk = "BNK", dpu = "DPU", nico = "NICo"
+        /// Serves the k0rdent API: this is a management cluster.
+        case k0rdent = "k0rdent"
+        /// Provisioned or adopted by a k0rdent management cluster elsewhere.
+        case managed = "k0rdent-managed"
+        /// At least one node advertises a GPU as an extended resource.
+        case gpu = "GPU"
+        case kubevirt = "KubeVirt"
+
         static func < (a: Role, b: Role) -> Bool { a.rawValue < b.rawValue }
     }
 
@@ -83,9 +106,12 @@ final class ManagedCluster: Identifiable {
 
     /// Ask the cluster what it is.
     ///
-    /// Roles are read from pod labels rather than namespace names, because on a
-    /// real deployment these live on different clusters and the namespaces vary
-    /// by install shape — the same reason bnkscope detects them this way.
+    /// TMM, DPU and NICo are read from pod labels rather than namespace names,
+    /// because on a real deployment these live on different clusters and the
+    /// namespaces vary by install shape — the same reason bnkscope detects them
+    /// this way. k0rdent and KubeVirt are read from API discovery instead:
+    /// both are operators, an operator's namespace is a deployment choice, and
+    /// the API it serves is not.
     /// Probe, or join the probe already running.
     ///
     /// Two callers ask for this concurrently — the store probes everything at
@@ -149,10 +175,39 @@ final class ManagedCluster: Identifiable {
             if try await !c.pods(labelSelector: "app.kubernetes.io/name=nico-api").isEmpty {
                 found.insert(.nico)
             }
+
+            // One discovery call answers "is k0rdent here" and "is KubeVirt
+            // here" together, and hands both the version each serves. Asked
+            // before either detector runs so neither has to hard-code a path.
+            apiGroups = (try? await c.apiGroups()) ?? [:]
+
+            k0rdent = await c.k0rdentFingerprint(groups: apiGroups)
+            switch k0rdent.role {
+            case .management: found.insert(.k0rdent)
+            case .managed:    found.insert(.managed)
+            case nil:         break
+            }
+
+            if c.kubeVirtVersion(groups: apiGroups) != nil { found.insert(.kubevirt) }
+
+            // Summed across nodes rather than reported per node: what decides
+            // whether a VM can be placed is how many cards the cluster has, and
+            // a two-node cluster with one card each reads the same as one node
+            // with two until you try to give a single VM both.
+            var gpus: [String: Int] = [:]
+            for node in nodes {
+                for gpu in node.gpuResources { gpus[gpu.name, default: 0] += gpu.count }
+            }
+            gpuDevices = gpus.map { $0.value > 1 ? "\($0.key) ×\($0.value)" : $0.key }.sorted()
+            if !gpus.isEmpty { found.insert(.gpu) }
+
             roles = found
         } catch {
             reach = .unreachable(Self.explain(error))
             tmmPods = []
+            k0rdent = K0rdent.Fingerprint()
+            apiGroups = [:]
+            gpuDevices = []
         }
         probeGeneration += 1
     }

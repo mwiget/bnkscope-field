@@ -9,6 +9,7 @@ struct BNKScopeFieldApp: App {
     @State private var nico = NICoEngine()
     @State private var overview = OverviewEngine()
     @State private var dpu = DPUEngine()
+    @State private var kubevirt = KubeVirtEngine()
     @State private var resources = ResourceEngine()
     @State private var navigator = Navigator()
     @Environment(\.scenePhase) private var scenePhase
@@ -23,6 +24,7 @@ struct BNKScopeFieldApp: App {
                 .environment(nico)
                 .environment(overview)
                 .environment(dpu)
+                .environment(kubevirt)
                 .environment(resources)
                 .environment(navigator)
                 .preferredColorScheme(.dark)

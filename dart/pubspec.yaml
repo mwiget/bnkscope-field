@@ -1,0 +1,8 @@
+# Pub workspace: one `dart pub get` here resolves every package below.
+name: bnkscope_field_workspace
+publish_to: none
+environment:
+  sdk: ^3.6.0
+workspace:
+  - bnk_kit
+  - bnk_engines

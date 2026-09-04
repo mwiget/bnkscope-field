@@ -16,19 +16,36 @@ xcodebuild -project App/BNKScopeField.xcodeproj -scheme BNKScopeField \
   -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5)' build
 ```
 
-### Dart port (`dart/bnk_kit`)
+### Dart port (`dart/`)
 
-The Flutter build starts here. `bnk_kit` is `BNKKit` ported to Dart with the
-same layering, no Flutter dependency, and a `bnkfield` CLI with the same
-twelve commands. It needs the Dart SDK that ships with Flutter
-(`brew install --cask flutter`).
+The Flutter build starts here. `dart/` is a pub workspace with two pure-Dart
+packages, no Flutter dependency in either, so everything below runs with
+`dart test` on a Linux runner:
+
+- `bnk_kit` is `BNKKit` ported with the same layering, plus the `bnkfield`
+  CLI with the same twelve commands and `lib/testing.dart`, a fake apiserver
+  on loopback with throwaway certificates.
+- `bnk_engines` is `App/BNKScopeField/Model/` ported: one `Observable` per
+  screen (`ClusterStore`, `TelemetryEngine`, `LogsEngine`, `ExecEngine`,
+  `ResourceEngine`, `OverviewEngine`, `KubeVirtEngine`, `NicoEngine`,
+  `DpuEngine`, `ScreenNavigator`). Each mutates its fields and calls
+  `notify()`; a view rebuilds on `changes`. Platform wording (`this iPad`,
+  where the privacy switch lives) comes in as `DeviceWords` from the app.
+
+The rule that keeps this portable: transport and engines never import a UI
+package, and a platform check is allowed only in the view layer's one shim.
 
 ```bash
-cd dart/bnk_kit
-dart pub get && dart analyze && dart test     # 71 cases, no cluster needed
-dart run bin/bnkfield.dart probe <kubeconfig> <context>
-dart compile exe bin/bnkfield.dart -o bnkfield
+brew install --cask flutter            # brings the Dart SDK
+cd dart && dart pub get && dart analyze
+(cd bnk_kit && dart test)              # 71 cases
+(cd bnk_engines && dart test)          # 27 cases, engines driven through the fake apiserver
+dart run bnk_kit/bin/bnkfield.dart probe <kubeconfig> <context>
+(cd bnk_kit && dart compile exe bin/bnkfield.dart -o bnkfield)
 ```
+
+Intel Linux builds and the Linux test run happen on `lake1` (Dart SDK under
+`~/dart-sdk`, workspace rsynced to `~/git/bnkscope-field-dart/`).
 
 **The keychain warning below does not apply to the Dart CLI.** dart:io takes
 the client certificate and key as the PEM bytes from the kubeconfig and never
@@ -38,8 +55,10 @@ learned the hard way: `HttpClient.connectionFactory` must return an already
 secured socket for https, which is how `tls-server-name` is honoured; and on
 macOS/iOS Dart verifies chains through Security.framework, which refuses a
 server certificate valid for more than 825 days (the test fixtures are issued
-for 800). `test/transport_test.dart` runs a fake apiserver on loopback and
-covers mutual TLS, the CA pin, port-forward framing, exec and logs.
+for 800). Two behaviours differ from Swift on purpose: the exec engine fills
+the cursor line after a newline instead of printing a blank line at every
+frame boundary, and the CPU panel is skipped when the cycle counters have
+not advanced, which a fixture that never changes will show you.
 
 **Open `App/BNKScopeField.xcodeproj`, not `Package.swift`.** The package window
 lists only `bnkfield`, `BNKKit` and `bnkscope-field-Package`; the app target is

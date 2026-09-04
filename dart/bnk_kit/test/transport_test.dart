@@ -4,162 +4,27 @@
 /// write, because its identity lived in a keychain.
 library;
 
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:bnk_kit/bnk_kit.dart';
+import 'package:bnk_kit/testing.dart';
 import 'package:test/test.dart';
 
-Uint8List fixture(String name) =>
-    File('test/fixtures/tls/$name.txt').readAsBytesSync();
+const fixtures = Fixtures('test/fixtures');
 
-/// Just enough apiserver to answer what the client asks.
-class FakeApiserver {
-  late final HttpServer server;
-  final metricsGz = File('test/fixtures/metrics.gz').readAsBytesSync();
-  int portForwardRequests = 0;
-
-  Future<void> start() async {
-    final context = SecurityContext(withTrustedRoots: false)
-      ..useCertificateChainBytes(fixture('server-cert'))
-      ..usePrivateKeyBytes(fixture('server-key'))
-      ..setTrustedCertificatesBytes(fixture('ca-cert'));
-    server = await HttpServer.bindSecure('127.0.0.1', 0, context,
-        requestClientCertificate: true);
-    server.listen(_handle);
-  }
-
-  int get port => server.port;
-
-  Future<void> stop() => server.close(force: true);
-
-  Future<void> _handle(HttpRequest request) async {
-    final path = request.uri.path;
-    final clientCN = request.certificate?.subject.replaceFirst('/CN=', '');
-    if (path == '/version') {
-      request.response
-        ..headers.contentType = ContentType.json
-        ..write(jsonEncode({'gitVersion': 'v1.30.0-fake', 'platform': 'linux/amd64'}));
-      await request.response.close();
-    } else if (path == '/whoami') {
-      request.response
-        ..headers.contentType = ContentType.json
-        ..write(jsonEncode({
-          'certificate': clientCN,
-          'authorization': request.headers.value('authorization'),
-          'userAgent': request.headers.value('user-agent'),
-        }));
-      await request.response.close();
-    } else if (path == '/api/v1/nodes') {
-      request.response.write(jsonEncode({
-        'items': [
-          {'metadata': {'name': 'n1'}, 'status': {'conditions': [{'type': 'Ready', 'status': 'True'}]}},
-          {'metadata': {'name': 'n2'}, 'status': {'conditions': [{'type': 'Ready', 'status': 'False'}]}},
-        ]
-      }));
-      await request.response.close();
-    } else if (path == '/forbidden') {
-      request.response
-        ..statusCode = 403
-        ..write('{"kind":"Status","message":"pods is forbidden"}');
-      await request.response.close();
-    } else if (path.endsWith('/log')) {
-      request.response.headers.contentType = ContentType.text;
-      request.response.write('2026-09-04T03:23:18.000000001Z first line\n');
-      await request.response.flush();
-      request.response.write('E0904 03:23:19.000000       1 x.go:1] second line\nno stamp at all\n');
-      await request.response.close();
-    } else if (path.endsWith('/portforward')) {
-      portForwardRequests++;
-      final socket = await WebSocketTransformer.upgrade(request,
-          protocolSelector: (protocols) => protocols.first);
-      _portForward(socket, int.parse(request.uri.queryParameters['ports']!));
-    } else if (path.endsWith('/exec')) {
-      final socket = await WebSocketTransformer.upgrade(request,
-          protocolSelector: (protocols) => protocols.first);
-      _exec(socket, request.uri.queryParametersAll['command'] ?? const []);
-    } else {
-      request.response.statusCode = 404;
-      await request.response.close();
-    }
-  }
-
-  /// v4.channel.k8s.io: port acks on both channels, then an HTTP/1.1 server
-  /// on channel 0 that stays open for the next request.
-  void _portForward(WebSocket socket, int port) async {
-    socket.add([0, port & 0xff, port >> 8]);
-    socket.add([1, port & 0xff, port >> 8]);
-    final pending = <int>[];
-    await for (final message in socket) {
-      if (message is! List<int> || message.isEmpty || message[0] != 0) continue;
-      pending.addAll(message.sublist(1));
-      final head = utf8.decode(pending);
-      final end = head.indexOf('\r\n\r\n');
-      if (end < 0) continue;
-      pending.clear();
-      final target = head.split(' ')[1];
-      final List<int> reply;
-      if (target == '/metrics') {
-        // Chunked and gzipped, which is what Go does for a streamed body.
-        final half = metricsGz.length ~/ 2;
-        reply = [
-          ...utf8.encode('HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nTransfer-Encoding: chunked\r\n\r\n'),
-          ...utf8.encode('${half.toRadixString(16)}\r\n'),
-          ...metricsGz.sublist(0, half),
-          ...utf8.encode('\r\n${(metricsGz.length - half).toRadixString(16)};ext=1\r\n'),
-          ...metricsGz.sublist(half),
-          ...utf8.encode('\r\n0\r\n\r\n'),
-        ];
-      } else if (target == '/plain') {
-        const body = 'plain_metric 42\n';
-        reply = utf8.encode('HTTP/1.1 200 OK\r\nContent-Length: ${body.length}\r\n\r\n$body');
-      } else {
-        reply = utf8.encode('HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
-      }
-      // Frames cut at awkward places, so the reader has to buffer across
-      // them: mid-status-line, mid-header, mid-chunk.
-      for (var i = 0; i < reply.length; i += 7) {
-        socket.add([0, ...reply.sublist(i, i + 7 > reply.length ? reply.length : i + 7)]);
-      }
-      if (target != '/metrics' && target != '/plain') {
-        await socket.close();
-        return;
-      }
-    }
-  }
-
-  /// v5.channel.k8s.io: stdout, stderr, then a Status on channel 3.
-  void _exec(WebSocket socket, List<String> command) async {
-    socket.add([1, ...utf8.encode('ran: ${command.join(' ')}\n')]);
-    socket.add([2, ...utf8.encode('a warning\n')]);
-    final status = command.first == 'false'
-        ? {'status': 'Failure', 'message': 'command terminated with exit code 1', 'reason': 'NonZeroExitCode'}
-        : {'status': 'Success'};
-    socket.add([3, ...utf8.encode(jsonEncode(status))]);
-    await socket.close();
-  }
-}
+Uint8List fixture(String name) => fixtures.tls(name);
 
 KubeContext contextFor(FakeApiserver api,
         {KubeAuth? auth, bool pinCA = true, String? tlsServerName, bool insecure = false}) =>
-    KubeContext(
-      name: 'fake',
-      clusterName: 'fake',
-      server: Uri.parse('https://127.0.0.1:${api.port}'),
-      caPEM: pinCA ? fixture('ca-cert') : null,
-      tlsServerName: tlsServerName,
-      insecureSkipTLSVerify: insecure,
-      namespace: null,
-      auth: auth ?? ClientCertificateAuth(fixture('client-cert'), fixture('client-key')),
-    );
+    fixtures.context(api, auth: auth, pinCA: pinCA, tlsServerName: tlsServerName, insecure: insecure);
 
 void main() {
   late FakeApiserver api;
 
   setUpAll(() async {
-    api = FakeApiserver();
+    api = FakeApiserver(fixtures: fixtures);
     await api.start();
   });
 

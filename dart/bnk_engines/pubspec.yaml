@@ -1,0 +1,17 @@
+name: bnk_engines
+description: The per-screen engines of bnkscope Field, pure Dart, one per screen, no UI.
+version: 0.1.0
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  bnk_kit:
+    path: ../bnk_kit
+  meta: ^1.16.0
+
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.0

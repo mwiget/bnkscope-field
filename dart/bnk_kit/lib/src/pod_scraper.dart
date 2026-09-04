@@ -82,9 +82,13 @@ class PodScraper {
     return fresh;
   }
 
+  /// Let go first, close second. A scrape that starts while the old tunnel
+  /// is still closing must find nothing and open its own, not adopt one
+  /// that is on its way out and then lose it when this method resumes.
   Future<void> _discard() async {
-    await _tunnel?.close();
+    final tunnel = _tunnel;
     _tunnel = null;
+    await tunnel?.close();
   }
 
   /// Let go of the tunnel. Called when the app stops watching, so a pod is not

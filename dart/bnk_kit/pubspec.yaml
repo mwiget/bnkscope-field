@@ -2,12 +2,14 @@ name: bnk_kit
 description: Transport for bnkscope Field. Everything reaches a cluster through one door, the apiserver.
 version: 0.1.0
 publish_to: none
+resolution: workspace
 
 environment:
   sdk: ^3.6.0
 
 dependencies:
   logging: ^1.2.0
+  meta: ^1.16.0
   yaml: ^3.1.2
 
 dev_dependencies:

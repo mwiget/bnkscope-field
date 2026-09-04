@@ -65,8 +65,8 @@ class Exporter {
   /// else is a quiet lie.
   static String? runningImage(Pod pod) {
     final declared = [
-      ...pod.spec?.containers ?? const <Container>[],
-      ...pod.spec?.ephemeralContainers ?? const <Container>[],
+      ...pod.spec?.containers ?? const <PodContainer>[],
+      ...pod.spec?.ephemeralContainers ?? const <PodContainer>[],
     ];
     for (final c in declared) {
       if (c.name == containerName) return c.image;

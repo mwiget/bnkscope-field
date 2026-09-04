@@ -1,0 +1,27 @@
+name: bnkscope_field
+description: "bnkscope Field: a field engineer's view into BNK, DPU and NICo clusters."
+publish_to: none
+resolution: workspace
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  bnk_engines:
+    path: ../bnk_engines
+  bnk_kit:
+    path: ../bnk_kit
+  file_picker: ^10.0.0
+  path_provider: ^2.1.5
+  window_manager: ^0.5.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

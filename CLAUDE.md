@@ -31,6 +31,14 @@ packages, no Flutter dependency in either, so everything below runs with
   `DpuEngine`, `ScreenNavigator`). Each mutates its fields and calls
   `notify()`; a view rebuilds on `changes`. Platform wording (`this iPad`,
   where the privacy switch lives) comes in as `DeviceWords` from the app.
+- `bnkscope_field` is the Flutter app (iOS, Android, macOS, Windows).
+  `lib/platform.dart` is the *entire* platform divergence, the Flutter
+  `Portable.swift`; `lib/observe.dart` is the one adapter from an engine's
+  `changes` stream to a widget rebuild; `lib/theme.dart` carries the web
+  UI's tokens and the mark. Screens live in `lib/screens/`, one file each,
+  and a screen not yet ported shows `PlaceholderScreen` rather than
+  pretending. Model names that clash with Flutter's were renamed on the
+  kit side (`PodContainer`) or the widget side (`Pill`, `Panel`).
 
 The rule that keeps this portable: transport and engines never import a UI
 package, and a platform check is allowed only in the view layer's one shim.
@@ -40,6 +48,7 @@ brew install --cask flutter            # brings the Dart SDK
 cd dart && dart pub get && dart analyze
 (cd bnk_kit && dart test)              # 71 cases
 (cd bnk_engines && dart test)          # 27 cases, engines driven through the fake apiserver
+(cd bnkscope_field && flutter analyze && flutter test && flutter build macos --debug)
 dart run bnk_kit/bin/bnkfield.dart probe <kubeconfig> <context>
 (cd bnk_kit && dart compile exe bin/bnkfield.dart -o bnkfield)
 ```

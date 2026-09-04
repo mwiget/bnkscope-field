@@ -122,21 +122,21 @@ class Pod {
   /// which, so a viewer that wants the whole pod has to ask for each
   /// separately: an f5-tmm pod is eight streams, not one.
   List<String> get logSources => [
-        for (final c in spec?.containers ?? const <Container>[]) c.name,
-        for (final c in spec?.ephemeralContainers ?? const <Container>[]) c.name,
+        for (final c in spec?.containers ?? const <PodContainer>[]) c.name,
+        for (final c in spec?.ephemeralContainers ?? const <PodContainer>[]) c.name,
       ];
 }
 
 class PodSpec {
   final String? nodeName;
-  final List<Container> containers;
-  final List<Container>? ephemeralContainers;
+  final List<PodContainer> containers;
+  final List<PodContainer>? ephemeralContainers;
   final List<Volume>? volumes;
   PodSpec.fromJson(JsonMap j)
       : nodeName = asString(j['nodeName']),
-        containers = asList(j['containers'], Container.fromJson),
+        containers = asList(j['containers'], PodContainer.fromJson),
         ephemeralContainers =
-            asListOrNull(j['ephemeralContainers'], Container.fromJson),
+            asListOrNull(j['ephemeralContainers'], PodContainer.fromJson),
         volumes = asListOrNull(j['volumes'], Volume.fromJson);
 }
 
@@ -145,7 +145,7 @@ class Volume {
   Volume.fromJson(JsonMap j) : name = j['name'] as String;
 }
 
-class Container {
+class PodContainer {
   final String name;
   final String? image;
 
@@ -153,7 +153,7 @@ class Container {
   /// Sveltos agent names the k0rdent object it reports for in its own flags
   /// and nowhere else on the cluster.
   final List<String>? args;
-  Container.fromJson(JsonMap j)
+  PodContainer.fromJson(JsonMap j)
       : name = j['name'] as String,
         image = asString(j['image']),
         args = asStrings(j['args']);

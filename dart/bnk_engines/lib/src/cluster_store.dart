@@ -278,6 +278,14 @@ class ManagedCluster extends Observable {
         return '${words.thisDevice} is refusing this app the local network — '
             'switch bnkscope Field on under ${words.localNetworkSetting}';
       }
+      // macOS answers a Local Network denial with "No route to host", the
+      // same words as a genuinely unroutable address. Say both, because
+      // the reader can only fix one of them from here.
+      if (host.isNotEmpty && Net.isLocal(host) && message.contains('no route to host')) {
+        return 'no route to this local address from ${words.thisDevice}. If it is on the same network, '
+            '${words.thisDevice} may be refusing this app the local network: '
+            'switch bnkscope Field on under ${words.localNetworkSetting}';
+      }
       return 'no route to this address from ${words.thisDevice}';
     }
     return error.toString();

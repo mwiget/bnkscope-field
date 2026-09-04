@@ -41,6 +41,16 @@ void main() {
               SocketException('x', osError: const OSError('Operation not permitted', 1), address: InternetAddress('192.168.1.5')),
               words: words),
           contains('Settings › Privacy'));
+      expect(
+          ManagedCluster.explain(
+              SocketException('x', osError: const OSError('No route to host', 65), address: InternetAddress('192.168.1.5')),
+              words: words),
+          allOf(contains('no route to this local address'), contains('Settings › Privacy')));
+      expect(
+          ManagedCluster.explain(
+              SocketException('x', osError: const OSError('No route to host', 113), address: InternetAddress('8.8.8.8')),
+              words: words),
+          'no route to this address from this iPad');
       expect(ManagedCluster.explain(Exception('odd')), 'Exception: odd');
     });
   });

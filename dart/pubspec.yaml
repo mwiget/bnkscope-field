@@ -6,3 +6,4 @@ environment:
 workspace:
   - bnk_kit
   - bnk_engines
+  - bnkscope_field

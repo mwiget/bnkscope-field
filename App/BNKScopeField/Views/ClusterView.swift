@@ -9,6 +9,7 @@ struct ClusterView: View {
     @Binding var columns: NavigationSplitViewVisibility
     @Environment(ClusterStore.self) private var store
     @State private var probing = false
+    @State private var importing = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,15 +20,28 @@ struct ClusterView: View {
                     ClusterCard(cluster: cluster)
                         .padding(20)
                 }
+            } else if store.clusters.isEmpty {
+                // The button is here as well as in the sidebar, because below
+                // 900 pt the sidebar is folded away and a sentence pointing at
+                // it points at nothing on screen.
+                Message(title: "No kubeconfigs yet",
+                        detail: "Import one \(ManagedCluster.importSource). Field needs a context with a client certificate or a bearer token — anything that shells out to aws, gcloud or kubelogin cannot be used here.") {
+                    Button("Import kubeconfig") { importing = true }
+                        .buttonStyle(.borderedProminent)
+                }
             } else {
-                Message(title: store.clusters.isEmpty ? "No kubeconfigs yet" : "No cluster selected",
-                        detail: store.clusters.isEmpty
-                            ? "Import one \(ManagedCluster.importSource). Field needs a context with a client certificate or a bearer token — anything that shells out to aws, gcloud or kubelogin cannot be used here."
-                            : "Pick one in the sidebar.")
+                Message(title: "No cluster selected", detail: "Pick one in the sidebar.")
             }
         }
         .background(Theme.bg)
         .noNavigationBar()
+        .fileImporter(isPresented: $importing,
+                      allowedContentTypes: [.yaml, .text, .data],
+                      allowsMultipleSelection: true) { result in
+            guard case .success(let urls) = result else { return }
+            for url in urls { store.importKubeconfig(from: url) }
+            Task { await store.probeAll() }
+        }
     }
 
     private var toolbar: some View {

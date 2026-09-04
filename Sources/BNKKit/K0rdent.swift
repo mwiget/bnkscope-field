@@ -153,7 +153,11 @@ extension KubeClient {
         // flag that otherwise means "I am somebody's child". Testing in the
         // other order labels every management cluster as managed.
         if let groupVersion = groups[K0rdent.group] {
-            let resources = (try? await apiResources(groupVersion: groupVersion)) ?? []
+            // The group is served, so the answer is here; if its resource list
+            // cannot be read the answer is unknown, not "managed". Falling
+            // through to the Sveltos test on a read failure is the same
+            // inversion as falling through on a failed Management read.
+            guard let resources = try? await apiResources(groupVersion: groupVersion) else { return found }
             let servesManagements = resources.contains("managements")
             if servesManagements, let management = try? await k0rdentManagement(groupVersion) {
                 found.role = .management

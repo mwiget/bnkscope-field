@@ -389,9 +389,10 @@ struct K0rdentTests {
           {"name": "nothing.example.com"}]}
         """
         let list = try KubeClient.decoder.decode(K8s.APIGroupList.self, from: Data(json.utf8))
-        let map = Dictionary(uniqueKeysWithValues: list.groups.compactMap { group in
-            group.preferredVersion.map { (group.name, $0.groupVersion) }
-        })
+        // Through the client's own map, not a rebuild of it here — the rebuild
+        // used the trapping `uniqueKeysWithValues` form the client had moved
+        // off, and tested a shape the app no longer runs.
+        let map = KubeClient.preferredVersions(of: list)
         #expect(map[K0rdent.group] == "k0rdent.mirantis.com/v1beta1")
         #expect(map[KubeVirt.group] == "kubevirt.io/v1")
         #expect(map["nothing.example.com"] == nil)
@@ -535,6 +536,31 @@ struct KubeVirtTests {
         #expect(stuck.isRunning == false)     // nothing is up
         #expect(stuck.isDeclaredRunning)      // and it was asked to be
         #expect(stuck.state == "Scheduling")  // which is what the row says
+    }
+
+    /// `Manual` and `RerunOnFailure` say nothing about whether the machine
+    /// should be up; the status does. "Not Halted" read a stopped manual
+    /// machine as running and offered it Stop.
+    @Test func readsTheDeclaredStateOfAManuallyRunMachineOffItsStatus() throws {
+        let stopped = """
+        {"metadata": {"name": "m", "namespace": "default"},
+         "spec": {"runStrategy": "Manual"},
+         "status": {"created": false, "printableStatus": "Stopped"}}
+        """
+        let started = """
+        {"metadata": {"name": "m", "namespace": "default"},
+         "spec": {"runStrategy": "Manual"},
+         "status": {"created": true, "printableStatus": "Starting"}}
+        """
+        let always = """
+        {"metadata": {"name": "m", "namespace": "default"}, "spec": {"runStrategy": "Always"}}
+        """
+        let decode = { (json: String) in
+            try KubeClient.decoder.decode(KubeVirt.VirtualMachine.self, from: Data(json.utf8))
+        }
+        #expect(try decode(stopped).isRunning == false)
+        #expect(try decode(started).isRunning)
+        #expect(try decode(always).isRunning)
     }
 
     /// A machine that is genuinely down is declared down, and a standalone VMI

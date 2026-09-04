@@ -26,6 +26,14 @@ final class KubeVirtEngine {
     private var shown: ManagedCluster.ID?
 
     func load(cluster: ManagedCluster) async {
+        if shown != cluster.id {
+            // Emptied before the first await, not after the read. Until the
+            // new cluster's machines arrive the old ones were still on screen
+            // under the new cluster's name, and Start — which asks nothing —
+            // sent the old cluster's namespace/name to the new cluster.
+            machines = []
+            busy = nil
+        }
         shown = cluster.id
         // Keyed on `namespace/name`, which repeats across clusters deployed
         // from one template, so it cannot be allowed to outlive its cluster.
@@ -42,10 +50,15 @@ final class KubeVirtEngine {
         failure = nil
         do {
             let read = try await client.machines(groupVersion: version)
-            guard shown == cluster.id else { return }
+            guard shown == cluster.id, !Task.isCancelled else { return }
             machines = read
+            failure = nil
         } catch {
-            guard shown == cluster.id else { return }
+            // A load the view cancelled — the same cluster re-probed while
+            // this one was in flight — has a replacement already running, and
+            // its "cancelled" landing after the replacement's reset showed an
+            // error over the list the replacement then filled.
+            guard shown == cluster.id, !Task.isCancelled else { return }
             machines = []
             failure = TelemetryEngine.brief(error)
         }
@@ -69,11 +82,25 @@ final class KubeVirtEngine {
         actionFailure = nil
         do {
             try await client.perform(action, on: machine, groupVersion: groupVersion)
-            try? await Task.sleep(for: .seconds(1.5))
+        } catch {
+            if shown == cluster.id { actionFailure = (id: machine.id, why: TelemetryEngine.brief(error)) }
+            busy = nil
+            return
+        }
+        // The verb was accepted. A re-read that fails is a different fact and
+        // is said differently: reporting it under the row as the verb's own
+        // error had a machine that had just stopped showing "503" beside Stop
+        // and Restart buttons, and a second Stop answered 409.
+        try? await Task.sleep(for: .seconds(1.5))
+        do {
             let read = try await client.machines(groupVersion: groupVersion)
             if shown == cluster.id { machines = read }
         } catch {
-            if shown == cluster.id { actionFailure = (id: machine.id, why: TelemetryEngine.brief(error)) }
+            if shown == cluster.id {
+                actionFailure = (id: machine.id,
+                                 why: "\(action.rawValue.capitalized) was accepted, but the list could not be "
+                                    + "refreshed: \(TelemetryEngine.brief(error)). Refresh to see the result.")
+            }
         }
         busy = nil
     }

@@ -36,6 +36,9 @@ enum Section: String, CaseIterable, Identifiable {
     /// shape as bnkscope's tab, and better than a screen that is permanently
     /// empty on most clusters. Overview is nobody's: it reads every cluster.
     @MainActor func isAvailable(on cluster: ManagedCluster) -> Bool {
+        // A cluster the app cannot talk to has one screen: the one that says
+        // why, and offers to forget it.
+        guard cluster.isUsable else { return self == .cluster }
         switch self {
         case .overview: return false
         case .nico:     return cluster.roles.contains(.nico)
@@ -103,6 +106,17 @@ struct RootView: View {
                 }
             }
             .background(Theme.bg)
+            // The screen is checked against the cluster here, where every way
+            // the pair can change passes, and not only in the sidebar's own
+            // tap. Probe-all and remove move the selection without it, and a
+            // re-probe can take away the role a screen depends on; either
+            // left the detail showing a screen the cluster does not have.
+            .onChange(of: "\(store.selected ?? "")#\(store.current?.probeGeneration ?? 0)", initial: true) { _, _ in
+                if let cluster = store.current, navigator.section != .overview,
+                   !navigator.section.isAvailable(on: cluster) {
+                    navigator.section = .cluster
+                }
+            }
             // Here rather than on the sidebar, which is what offers the import:
             // below 900 pt the sidebar is collapsed away and an alert on a view
             // that is not in the hierarchy never shows. The detail column is
@@ -225,6 +239,10 @@ private struct Sidebar: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.card)
         .noNavigationBar()
+        // Whatever moved the selection — this sidebar, Overview's Open, a
+        // probe-all's second guess — the new cluster opens. A fold belongs to
+        // the cluster it was made on, not to whichever comes next.
+        .onChange(of: store.selected) { _, _ in folded = nil }
         .fileImporter(isPresented: $importing,
                       allowedContentTypes: [.yaml, .text, .data],
                       allowsMultipleSelection: true) { result in
@@ -242,6 +260,7 @@ private struct Sidebar: View {
     private func headerTapped(_ cluster: ManagedCluster) {
         guard store.selected == cluster.id else { return select(cluster) }
         if navigator.section == .overview {
+            folded = nil
             navigator.section = .cluster
         } else {
             folded = folded == cluster.id ? nil : cluster.id
@@ -303,11 +322,14 @@ private struct ClusterGroup: View {
 
     var body: some View {
         VStack(spacing: 2) {
+            // Selectable even when unusable: the row cannot open a cluster the
+            // app cannot talk to, but it can open the screen that says why and
+            // has the Remove button — which was otherwise reachable only from
+            // Overview.
             Button(action: header) {
                 ClusterRow(cluster: cluster, selected: selected, expanded: expanded)
             }
             .buttonStyle(.plain)
-            .disabled(!cluster.isUsable)
 
             if expanded {
                 ForEach(Section.available(on: cluster)) { item in
@@ -330,7 +352,7 @@ private struct ClusterRow: View {
                 // button, and a second tap on the selected row is what folds it.
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(cluster.isUsable ? Theme.faint : .clear)
+                    .foregroundStyle(Theme.faint)
                     .rotationEffect(.degrees(expanded ? 90 : 0))
                     .frame(width: 10)
                     // The demo driver finds a cluster row by the prefix of its

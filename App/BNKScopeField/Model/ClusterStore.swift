@@ -184,7 +184,13 @@ final class ManagedCluster: Identifiable {
             // One discovery call answers "is k0rdent here" and "is KubeVirt
             // here" together, and hands both the version each serves. Asked
             // before either detector runs so neither has to hard-code a path.
-            apiGroups = (try? await c.apiGroups()) ?? [:]
+            //
+            // Not `try?`. A discovery call that fails used to read as an empty
+            // map, and an empty map is a claim: no KubeVirt here, no k0rdent
+            // here — and with no k0rdent group the management test is skipped
+            // and the Sveltos test runs, which labels a management cluster as
+            // somebody's child. A probe that cannot finish has not answered.
+            apiGroups = try await c.apiGroups()
 
             k0rdent = await c.k0rdentFingerprint(groups: apiGroups)
             switch k0rdent.role {
@@ -209,10 +215,12 @@ final class ManagedCluster: Identifiable {
             roles = found
         } catch {
             reach = .unreachable(Self.explain(error))
+            // Everything probing derived stays as last known, together. The
+            // reach says the cluster cannot be read now; the roles, the
+            // fingerprint and the groups say what it was when it could — and
+            // clearing some of them while keeping the roles left a GPU badge
+            // with no devices under it and a k0rdent badge with no edition.
             tmmPods = []
-            k0rdent = K0rdent.Fingerprint()
-            apiGroups = [:]
-            gpuDevices = []
         }
         probeGeneration += 1
     }
@@ -264,7 +272,15 @@ final class ManagedCluster: Identifiable {
 final class ClusterStore {
     private(set) var clusters: [ManagedCluster] = []
     private(set) var files: [String] = []
-    var selected: ManagedCluster.ID?
+    var selected: ManagedCluster.ID? {
+        didSet { selectionWasAutomatic = false }
+    }
+    /// Whether `selected` was this store's guess rather than the user's pick.
+    ///
+    /// A guess is revisited once probing has answered; a pick is not — a
+    /// re-probe that jumped off the cluster someone had chosen, onto whichever
+    /// one had TMM pods, read as the app changing its mind for them.
+    private var selectionWasAutomatic = true
     var importError: String?
 
     /// Kubeconfigs live in Application Support, excluded from backup. The
@@ -300,6 +316,7 @@ final class ClusterStore {
         selected = clusters.first { $0.roles.contains(.bnk) }?.id
             ?? clusters.first { if case .reachable = $0.reach { return true } else { return false } }?.id
             ?? clusters.first(where: \.isUsable)?.id
+        selectionWasAutomatic = true
     }
 
     /// Copy an imported file in and adopt its contexts.
@@ -359,9 +376,12 @@ final class ClusterStore {
             }
         }
         // Roles are only known once probing has answered, so the default choice
-        // is worth revisiting now rather than at load.
-        selected = nil
-        selectSomethingUseful()
+        // is worth revisiting now rather than at load — the default choice, and
+        // only that. A cluster someone chose stays chosen.
+        if selectionWasAutomatic {
+            selected = nil
+            selectSomethingUseful()
+        }
     }
 
     var current: ManagedCluster? {

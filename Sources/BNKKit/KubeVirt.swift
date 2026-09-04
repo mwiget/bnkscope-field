@@ -44,9 +44,23 @@ public enum KubeVirt {
             public let conditions: [K8s.Condition]?
         }
 
+        /// Whether the declaration asks for the machine to be up.
+        ///
+        /// `Always` and `Halted` say so outright. `Manual`, `RerunOnFailure`
+        /// and `Once` do not: under those the machine is up when it has been
+        /// started and not stopped, and the only record of that is the
+        /// status — `created` says an instance exists. Reading "not Halted" as
+        /// "running" offered Stop to a manually managed machine that was
+        /// stopped, and never Start.
         public var isRunning: Bool {
             if let running = spec?.running { return running }
-            return (spec?.runStrategy ?? "") != "Halted"
+            switch spec?.runStrategy {
+            case "Always":  return true
+            case "Halted":  return false
+            default:
+                if let created = status?.created { return created }
+                return status?.printableStatus.map { $0 != "Stopped" } ?? false
+            }
         }
 
         public var state: String { status?.printableStatus ?? (isRunning ? "Starting" : "Stopped") }

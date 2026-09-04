@@ -173,6 +173,15 @@ class ManagedCluster extends Observable {
     await _runProbe();
   }
 
+  /// Let the connection pool go with the cluster: an idle keep-alive is a
+  /// timer nobody will use.
+  @override
+  void dispose() {
+    _cached?.close();
+    _cached = null;
+    super.dispose();
+  }
+
   Future<void> _runProbe() async {
     _probeSerial++;
     final mine = _probeSerial;

@@ -38,7 +38,11 @@ packages, no Flutter dependency in either, so everything below runs with
   UI's tokens and the mark. Screens live in `lib/screens/`, one file each,
   and a screen not yet ported shows `PlaceholderScreen` rather than
   pretending. Model names that clash with Flutter's were renamed on the
-  kit side (`PodContainer`) or the widget side (`Pill`, `Panel`).
+  kit side (`PodContainer`, `ScrapeStatus`) or the widget side (`Pill`,
+  `Panel`). Charts are drawn by `lib/chart.dart`'s own painter (monotone
+  cubic, gaps kept as gaps, fixed domain where the quantity has one); no
+  charting package. To open the app on a given screen for a screenshot,
+  launch the binary with `BNK_SECTION=tmmLive BNK_CLUSTER=<display name>`.
 
 The rule that keeps this portable: transport and engines never import a UI
 package, and a platform check is allowed only in the view layer's one shim.
@@ -52,6 +56,17 @@ cd dart && dart pub get && dart analyze
 dart run bnk_kit/bin/bnkfield.dart probe <kubeconfig> <context>
 (cd bnk_kit && dart compile exe bin/bnkfield.dart -o bnkfield)
 ```
+
+Widget tests that need real sockets (`test/tmm_live_test.dart`) lift the
+test binding's HttpClient override and advance fake time with
+`tester.pump(duration)` between real-IO waits: a timer created by a widget
+callback lives in the fake-async zone and never fires on its own, and any
+timer still pending at teardown fails the test, which is why engines cancel
+their timers on stop and a cluster closes its client pool on dispose.
+
+`bnkfield install <kubeconfig> <context>` is the app's Add button from the
+command line: it injects the exporter into every f5-tmm pod without one.
+Nothing restarts, but it is a change to a live cluster.
 
 Intel Linux builds and the Linux test run happen on `lake1` (Dart SDK under
 `~/dart-sdk`, workspace rsynced to `~/git/bnkscope-field-dart/`).

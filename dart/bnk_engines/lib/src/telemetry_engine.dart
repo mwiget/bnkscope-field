@@ -105,16 +105,16 @@ enum PanelId {
   ({double min, double max})? get yDomain => this == cpu ? (min: 0, max: 100) : null;
 }
 
-sealed class PodStatus {
-  const PodStatus();
+sealed class ScrapeStatus {
+  const ScrapeStatus();
 }
 
-class Answering extends PodStatus {
+class Answering extends ScrapeStatus {
   final int samples;
   const Answering(this.samples);
 }
 
-class Failing extends PodStatus {
+class Failing extends ScrapeStatus {
   final String why;
   const Failing(this.why);
 }
@@ -159,11 +159,12 @@ class _Outcome {
 class _Loop {
   bool cancelled = false;
   Completer<void>? _sleeping;
+  Timer? _timer;
 
   Future<void> sleep(Duration d) {
     final c = Completer<void>();
     _sleeping = c;
-    Timer(d, () {
+    _timer = Timer(d, () {
       if (!c.isCompleted) c.complete();
     });
     return c.future;
@@ -171,6 +172,7 @@ class _Loop {
 
   void cancel() {
     cancelled = true;
+    _timer?.cancel();
     final c = _sleeping;
     if (c != null && !c.isCompleted) c.complete();
   }
@@ -211,7 +213,7 @@ class TelemetryEngine extends Observable {
   int _reconnects = 0;
   int _failureStreak = 0;
   List<String> _targets = const [];
-  final Map<String, PodStatus> _podStatus = {};
+  final Map<String, ScrapeStatus> _podStatus = {};
 
   KubeClient? _client;
   String _namespace = '';
@@ -237,7 +239,7 @@ class TelemetryEngine extends Observable {
   /// What each pod did on the last scrape: how many samples it returned, or
   /// why it did not answer. Whether an exporter is installed is a different
   /// question from whether it is currently talking.
-  Map<String, PodStatus> get podStatus => _podStatus;
+  Map<String, ScrapeStatus> get podStatus => _podStatus;
 
   /// Whether a scrape loop is running, distinct from [state], which reports
   /// what the loop found.

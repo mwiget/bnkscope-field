@@ -28,6 +28,7 @@ usage: bnkfield <command>
   exec           <kubeconfig> <context> <namespace> <pod> <container> <cmd...>
   nico           <kubeconfig> <context>
   install-dryrun <kubeconfig> <context>
+  install        <kubeconfig> <context>          adds the exporter to every f5-tmm pod without one
   dpu            <kubeconfig> <context>
   get            <kubeconfig> <context> <kind> [namespace]
 ''';
@@ -302,6 +303,25 @@ Future<void> run(List<String> argv) async {
       for (final f in outcome.failed) {
         final reason = f.reason.length > 200 ? f.reason.substring(0, 200) : f.reason;
         print('  REJECTED: ${f.pod}\n            $reason');
+      }
+      client.close();
+
+    case 'install':
+      // The app's Add button, from the command line: an ephemeral container
+      // in every f5-tmm pod that has none. Nothing restarts. It is gone
+      // again when a pod is recreated, and nothing re-adds it.
+      if (args.length < 2) die(usage);
+      final client = KubeClient(await loadContext(args[0], args[1]));
+      final pods = await client.pods(labelSelector: 'app=f5-tmm');
+      final outcome = await Exporter.install(pods, clusterLabel: args[1], client: client);
+      for (final pod in outcome.changed) {
+        print('  added to: $pod');
+      }
+      for (final pod in outcome.skipped) {
+        print('  skipped:  $pod (already carries one)');
+      }
+      for (final f in outcome.failed) {
+        print('  FAILED:   ${f.pod}\n            ${f.reason}');
       }
       client.close();
 

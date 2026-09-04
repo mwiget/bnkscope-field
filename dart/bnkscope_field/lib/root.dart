@@ -9,6 +9,7 @@ import 'platform.dart';
 import 'screens/cluster.dart';
 import 'screens/overview.dart';
 import 'screens/placeholder.dart';
+import 'screens/tmm_live.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -90,6 +91,7 @@ class _RootViewState extends State<RootView> {
   Widget _detail(Section section) => switch (section) {
         Section.overview => const OverviewScreen(),
         Section.cluster => const ClusterScreen(),
+        Section.tmmLive => const TMMLiveScreen(),
         _ => PlaceholderScreen(section),
       };
 }

@@ -20,7 +20,10 @@ Future<void> main() async {
   final engines = Engines(store: store);
   // Load what was imported before, then ask every cluster what it is. Not
   // awaited: the window opens on the last known state and fills in.
-  unawaited(store.load().then((_) => store.probeAll()));
+  unawaited(store.load().then((_) async {
+    openWhereAsked(engines);
+    await store.probeAll();
+  }));
   runApp(FieldApp(engines: engines));
 }
 
@@ -75,4 +78,26 @@ class _FieldAppState extends State<FieldApp> with WidgetsBindingObserver {
           home: const RootView(),
         ),
       );
+}
+
+/// Open on a given screen and cluster when the environment asks, so a
+/// screenshot or a demo can start where it needs to without a tap. Names
+/// are the Section enum's and the cluster's display name; anything that
+/// does not match is ignored.
+///
+///     BNK_SECTION=tmmLive BNK_CLUSTER=dpu-cplane-tenant1 "bnkscope Field.app/Contents/MacOS/bnkscope Field"
+void openWhereAsked(Engines engines) {
+  final env = Platform.environment;
+  final wanted = env['BNK_CLUSTER'];
+  if (wanted != null) {
+    for (final c in engines.store.clusters) {
+      if (c.displayName == wanted || c.id == wanted) engines.store.selected = c.id;
+    }
+  }
+  final section = env['BNK_SECTION'];
+  if (section != null) {
+    for (final s in Section.values) {
+      if (s.name == section) engines.navigator.section = s;
+    }
+  }
 }

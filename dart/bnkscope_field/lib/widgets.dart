@@ -86,7 +86,8 @@ class Message extends StatelessWidget {
   final String title;
   final String detail;
   final Widget? action;
-  const Message({super.key, required this.title, required this.detail, this.action});
+  final Color tone;
+  const Message({super.key, required this.title, required this.detail, this.action, this.tone = Tokens.muted});
 
   @override
   Widget build(BuildContext context) => Center(
@@ -97,7 +98,7 @@ class Message extends StatelessWidget {
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               Text(title, style: Tokens.text(17, weight: FontWeight.w600), textAlign: TextAlign.center),
               const SizedBox(height: 8),
-              Text(detail, style: Tokens.text(13, color: Tokens.muted), textAlign: TextAlign.center),
+              Text(detail, style: Tokens.text(13, color: tone), textAlign: TextAlign.center),
               if (action != null) ...[const SizedBox(height: 18), action!],
             ]),
           ),

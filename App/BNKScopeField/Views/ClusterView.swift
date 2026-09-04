@@ -2,87 +2,64 @@ import SwiftUI
 import UniformTypeIdentifiers
 import BNKKit
 
-struct ClustersView: View {
+/// One cluster: how it is reached, what probing found there, and the way to
+/// forget it. Import and probe-all live in the sidebar, next to the list they
+/// act on; this screen is about the one cluster that is selected.
+struct ClusterView: View {
     @Binding var columns: NavigationSplitViewVisibility
     @Environment(ClusterStore.self) private var store
-    @State private var importing = false
     @State private var probing = false
 
     var body: some View {
         VStack(spacing: 0) {
             toolbar
             Divider().overlay(Theme.border)
-            ScrollView {
-                VStack(spacing: 12) {
-                    if let error = store.importError {
-                        Banner(text: error, tone: Theme.bad)
-                    }
-                    ForEach(store.clusters) { cluster in
-                        ClusterCard(cluster: cluster, selected: store.selected == cluster.id)
-                            .onTapGesture { if cluster.isUsable { store.selected = cluster.id } }
-                    }
-                    if store.clusters.isEmpty {
-                        Message(title: "No kubeconfigs yet",
-                                detail: "Import one from Files. Field needs a context with a client certificate or a bearer token — anything that shells out to aws, gcloud or kubelogin cannot be used on iOS.") {
-                            Button("Import kubeconfig") { importing = true }
-                                .buttonStyle(.borderedProminent)
-                        }
-                        .frame(minHeight: 320)
-                    }
+            if let cluster = store.current {
+                ScrollView {
+                    ClusterCard(cluster: cluster)
+                        .padding(20)
                 }
-                .padding(20)
+            } else {
+                Message(title: store.clusters.isEmpty ? "No kubeconfigs yet" : "No cluster selected",
+                        detail: store.clusters.isEmpty
+                            ? "Import one from the sidebar. Field needs a context with a client certificate or a bearer token — anything that shells out to aws, gcloud or kubelogin cannot be used on iOS."
+                            : "Pick one in the sidebar.")
             }
         }
         .background(Theme.bg)
         .noNavigationBar()
-        .fileImporter(isPresented: $importing,
-                      allowedContentTypes: [.yaml, .text, .data],
-                      allowsMultipleSelection: true) { result in
-            guard case .success(let urls) = result else { return }
-            for url in urls { store.importKubeconfig(from: url) }
-            Task { await store.probeAll() }
-        }
     }
 
     private var toolbar: some View {
         HStack(spacing: 12) {
             SidebarToggle(columns: $columns)
-            Text("Clusters").font(.system(size: 19, weight: .semibold)).foregroundStyle(Theme.fg)
-                .fixedSize()
-            Text("\(store.clusters.count) contexts · \(reachableCount) reachable")
-                .font(Theme.mono(11.5)).foregroundStyle(Theme.muted)
-                .lineLimit(1)
+            Text(store.current?.displayName ?? "Cluster")
+                .font(.system(size: 19, weight: .semibold)).foregroundStyle(Theme.fg)
+                .lineLimit(1).truncationMode(.middle)
+            if let cluster = store.current {
+                Text(cluster.context.server.absoluteString)
+                    .font(Theme.mono(11.5)).foregroundStyle(Theme.muted)
+                    .lineLimit(1).truncationMode(.middle)
+            }
             Spacer(minLength: 8)
-            Button {
-                probing = true
-                Task { await store.probeAll(); probing = false }
-            } label: {
-                Label(probing ? "Probing…" : "Probe all", systemImage: "wifi")
-                    .font(.system(size: 12.5, weight: .semibold))
-            }
-            .buttonStyle(.bordered)
-            .disabled(probing)
-
-            Button { importing = true } label: {
-                ViewThatFits(in: .horizontal) {
-                    Label("Import kubeconfig", systemImage: "plus")
+            if let cluster = store.current, cluster.isUsable {
+                Button {
+                    probing = true
+                    Task { await cluster.probe(); probing = false }
+                } label: {
+                    Label(probing ? "Probing…" : "Probe", systemImage: "wifi")
                         .font(.system(size: 12.5, weight: .semibold))
-                    Image(systemName: "plus").font(.system(size: 13, weight: .semibold))
                 }
+                .buttonStyle(.bordered)
+                .disabled(probing)
             }
-            .buttonStyle(.borderedProminent)
         }
         .padding(.horizontal, 20).frame(height: 58)
-    }
-
-    private var reachableCount: Int {
-        store.clusters.filter { if case .reachable = $0.reach { return true } else { return false } }.count
     }
 }
 
 private struct ClusterCard: View {
     let cluster: ManagedCluster
-    let selected: Bool
     @Environment(ClusterStore.self) private var store
     @State private var confirmingRemoval = false
 
@@ -148,9 +125,7 @@ private struct ClusterCard: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12)
-            .strokeBorder(selected ? Theme.primary.opacity(0.4) : Theme.border))
-        .contentShape(Rectangle())
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border))
         .alert("Remove \(cluster.displayName)?", isPresented: $confirmingRemoval) {
             Button("Cancel", role: .cancel) { }
             Button("Remove", role: .destructive) { store.remove(cluster) }

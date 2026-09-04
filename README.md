@@ -242,9 +242,16 @@ closure capturing two `ISO8601DateFormatter`s, and a dead local kept alive by a
 synchronized file group, so new files under `App/BNKScopeField/` are picked up
 without editing the project.
 
-**Clusters** imports kubeconfigs, probes each context and
-reports what it found — Kubernetes version, node readiness, and BNK / DPF / NICo
-detected from pod labels rather than namespace names. **TMM Live** scrapes the
+The sidebar is one outline: **Overview** at the top, then every imported
+cluster, and under the selected cluster the screens it has. Which screens is a
+property of the cluster — NICo, DPU Services and KubeVirt appear only under a
+cluster running them — so the list reads as "what this cluster offers" rather
+than as a menu that changes when something below it is picked. Import and
+probe-all sit at the sidebar's foot, next to the list they act on.
+
+**Cluster** is the first screen under each: how it is reached, what probing
+found — Kubernetes version, node readiness, and BNK / DPF / NICo detected from
+pod labels rather than namespace names — and the way to forget it. **TMM Live** scrapes the
 exporter in every f5-tmm pod every two seconds, in parallel, and derives the
 panels the Grafana dashboard would: CPU from the cycle counters, throughput and
 connection rates from the counter deltas, connections straight off the gauge.

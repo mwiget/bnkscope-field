@@ -1,9 +1,12 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum Section: String, CaseIterable, Identifiable {
     case overview = "Overview"
+    /// The cluster itself: how it is reached, what it is, and the way to forget
+    /// it. First under every cluster, because it is where "Open" lands.
+    case cluster  = "Cluster"
     case tmmLive  = "TMM Live"
-    case clusters = "Clusters"
     case resources = "Resources"
     case logs = "Logs"
     case dpu = "DPU Services"
@@ -16,8 +19,8 @@ enum Section: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .overview: return "square.grid.2x2"
+        case .cluster:  return "server.rack"
         case .tmmLive:  return "waveform.path.ecg"
-        case .clusters: return "square.stack.3d.up"
         case .resources: return "list.bullet.rectangle"
         case .logs: return "text.alignleft"
         case .dpu: return "point.3.connected.trianglepath.dotted"
@@ -25,6 +28,26 @@ enum Section: String, CaseIterable, Identifiable {
         case .kubevirt: return "macwindow.on.rectangle"
         case .terminal: return "apple.terminal"
         }
+    }
+
+    /// Whether this screen exists on a given cluster.
+    ///
+    /// NICo, DPU and KubeVirt appear only on a cluster running them — the same
+    /// shape as bnkscope's tab, and better than a screen that is permanently
+    /// empty on most clusters. Overview is nobody's: it reads every cluster.
+    @MainActor func isAvailable(on cluster: ManagedCluster) -> Bool {
+        switch self {
+        case .overview: return false
+        case .nico:     return cluster.roles.contains(.nico)
+        case .dpu:      return cluster.roles.contains(.dpu)
+        case .kubevirt: return cluster.roles.contains(.kubevirt)
+        default:        return true
+        }
+    }
+
+    /// The screens one cluster offers, in sidebar order.
+    @MainActor static func available(on cluster: ManagedCluster) -> [Section] {
+        allCases.filter { $0.isAvailable(on: cluster) }
     }
 }
 
@@ -62,9 +85,8 @@ struct RootView: View {
     }
 
     private var split: some View {
-        @Bindable var navigator = navigator
-        return NavigationSplitView(columnVisibility: $columns) {
-            Sidebar(section: $navigator.section)
+        NavigationSplitView(columnVisibility: $columns) {
+            Sidebar()
                 .navigationSplitViewColumnWidth(min: 260, ideal: 268, max: 320)
         } detail: {
             Group {
@@ -76,11 +98,23 @@ struct RootView: View {
                 case .kubevirt:            KubeVirtView(columns: $columns)
                 case .terminal:            TerminalView(columns: $columns)
                 case .overview:            OverviewView(columns: $columns)
-                case .clusters:            ClustersView(columns: $columns)
+                case .cluster:             ClusterView(columns: $columns)
                 case .resources:           ResourcesView(columns: $columns)
                 }
             }
             .background(Theme.bg)
+            // Here rather than on the sidebar, which is what offers the import:
+            // below 900 pt the sidebar is collapsed away and an alert on a view
+            // that is not in the hierarchy never shows. The detail column is
+            // always there.
+            .alert("Could not import that file",
+                   isPresented: Binding(get: { store.importError != nil },
+                                        set: { if !$0 { store.importError = nil } }),
+                   presenting: store.importError) { _ in
+                Button("OK", role: .cancel) { }
+            } message: { why in
+                Text(why)
+            }
         }
         .navigationSplitViewStyle(.balanced)
     }
@@ -95,24 +129,17 @@ private struct Sidebar: View {
     #endif
 
     @Environment(ClusterStore.self) private var store
-    @Binding var section: Section
-
-    /// NICo, DPU and KubeVirt appear only on a cluster running them — the same
-    /// shape as bnkscope's tab, and better than a screen that is permanently
-    /// empty on most clusters.
-    private var visibleSections: [Section] {
-        Section.allCases.filter { section in
-            switch section {
-            case .nico:     store.current?.roles.contains(.nico) == true
-            case .dpu:      store.current?.roles.contains(.dpu) == true
-            case .kubevirt: store.current?.roles.contains(.kubevirt) == true
-            default:        true
-            }
-        }
-    }
+    @Environment(Navigator.self) private var navigator
+    @State private var importing = false
+    @State private var probing = false
+    /// The selected cluster, when its sections have been folded away.
+    ///
+    /// Only the selected cluster is ever open — one list of screens at a time,
+    /// under the cluster they belong to — so this is a single id rather than a
+    /// set, and it forgets itself the moment the selection moves.
+    @State private var folded: ManagedCluster.ID?
 
     var body: some View {
-        @Bindable var store = store
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 BNKMark(size: 28)
@@ -141,42 +168,27 @@ private struct Sidebar: View {
             .frame(maxWidth: .infinity, alignment: Self.wordmarkAlignment)
             .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 14)
 
-            VStack(spacing: 2) {
-                ForEach(visibleSections) { item in
-                    Button { section = item } label: {
-                        HStack(spacing: 11) {
-                            Image(systemName: item.symbol)
-                                .font(.system(size: 15, weight: .medium))
-                                .frame(width: 18)
-                            Text(item.rawValue).font(.system(size: 14, weight: section == item ? .semibold : .medium))
-                            Spacer()
-                        }
-                        .foregroundStyle(section == item ? Color(hex: 0xDFE7F7) : Theme.fg)
-                        .padding(.horizontal, 11).frame(height: 38)
-                        .background(section == item ? Theme.primary.opacity(0.12) : .clear,
-                                    in: RoundedRectangle(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 10)
-
-            Divider().overlay(Theme.border).padding(.horizontal, 16).padding(.top, 14)
-
-            // No "CLUSTERS" heading. There is already a Clusters entry in the
-            // navigation above, and one word doing two jobs — a screen you open
-            // and a list you pick from — read as the same thing listed twice.
-            // The rows sit under a divider and are self-evidently clusters.
-            Spacer().frame(height: 12)
-
+            // One outline. Overview stands alone at the top because it is the
+            // only screen that reads every cluster; everything else is a screen
+            // *of* a cluster, and sits under the cluster it is of. That is what
+            // lets a cluster's screens differ — KubeVirt under one, NICo under
+            // another — without the list above the cluster rewriting itself
+            // every time the selection below it changed.
             ScrollView {
                 VStack(spacing: 2) {
+                    SectionRow(section: .overview, active: navigator.section == .overview) {
+                        navigator.section = .overview
+                    }
+
+                    Divider().overlay(Theme.border).padding(.horizontal, 6).padding(.vertical, 10)
+
                     ForEach(store.clusters) { cluster in
-                        Button { store.selected = cluster.id } label: {
-                            ClusterRow(cluster: cluster, selected: store.selected == cluster.id)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!cluster.isUsable)
+                        ClusterGroup(cluster: cluster,
+                                     selected: store.selected == cluster.id,
+                                     expanded: store.selected == cluster.id && folded != cluster.id,
+                                     active: navigator.section,
+                                     header: { headerTapped(cluster) },
+                                     open: { select(cluster, section: $0) })
                     }
                 }
                 .padding(.horizontal, 10)
@@ -184,20 +196,143 @@ private struct Sidebar: View {
             .scrollBounceBehavior(.basedOnSize)
 
             Spacer(minLength: 0)
+
+            Divider().overlay(Theme.border)
+            HStack(spacing: 8) {
+                Button { importing = true } label: {
+                    ViewThatFits(in: .horizontal) {
+                        Label("Import kubeconfig", systemImage: "plus")
+                        Label("Import", systemImage: "plus")
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.borderedProminent).controlSize(.small)
+                .accessibilityLabel("Import kubeconfig")
+
+                Button {
+                    probing = true
+                    Task { await store.probeAll(); probing = false }
+                } label: {
+                    Label(probing ? "Probing…" : "Probe all", systemImage: "wifi")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.bordered).controlSize(.small)
+                .disabled(probing || store.clusters.isEmpty)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.card)
         .noNavigationBar()
+        .fileImporter(isPresented: $importing,
+                      allowedContentTypes: [.yaml, .text, .data],
+                      allowsMultipleSelection: true) { result in
+            guard case .success(let urls) = result else { return }
+            for url in urls { store.importKubeconfig(from: url) }
+            Task { await store.probeAll() }
+        }
+    }
+
+    /// A tap on the cluster's own row.
+    ///
+    /// The first tap takes you there; a second folds it. Except from Overview,
+    /// where the cluster is selected but nothing of it is on screen — there a
+    /// tap on the selected cluster should still open it, not hide its screens.
+    private func headerTapped(_ cluster: ManagedCluster) {
+        guard store.selected == cluster.id else { return select(cluster) }
+        if navigator.section == .overview {
+            navigator.section = .cluster
+        } else {
+            folded = folded == cluster.id ? nil : cluster.id
+        }
+    }
+
+    /// Make this the cluster the screens are about.
+    ///
+    /// The screen stays put when it can: switching from one cluster's Logs to
+    /// another's is one tap, which is the thing a per-cluster sidebar would
+    /// otherwise cost. It moves only when it has to — off Overview, which is
+    /// not a screen of any cluster, or off a screen this cluster does not have.
+    private func select(_ cluster: ManagedCluster, section: Section? = nil) {
+        store.selected = cluster.id
+        folded = nil
+        if let section {
+            navigator.section = section
+        } else if !navigator.section.isAvailable(on: cluster) {
+            navigator.section = .cluster
+        }
+    }
+}
+
+/// One screen in the outline: Overview at the top, or a cluster's screen under it.
+private struct SectionRow: View {
+    let section: Section
+    let active: Bool
+    var indented = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 11) {
+                Image(systemName: section.symbol)
+                    .font(.system(size: indented ? 13 : 15, weight: .medium))
+                    .frame(width: 18)
+                Text(section.rawValue)
+                    .font(.system(size: indented ? 13 : 14, weight: active ? .semibold : .medium))
+                Spacer()
+            }
+            .foregroundStyle(active ? Color(hex: 0xDFE7F7) : Theme.fg)
+            .padding(.leading, indented ? 26 : 11).padding(.trailing, 11)
+            .frame(height: indented ? 32 : 38)
+            .background(active ? Theme.primary.opacity(0.12) : .clear,
+                        in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// A cluster and, when it is the selected one, the screens it has.
+private struct ClusterGroup: View {
+    let cluster: ManagedCluster
+    let selected: Bool
+    let expanded: Bool
+    let active: Section
+    let header: () -> Void
+    let open: (Section) -> Void
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Button(action: header) {
+                ClusterRow(cluster: cluster, selected: selected, expanded: expanded)
+            }
+            .buttonStyle(.plain)
+            .disabled(!cluster.isUsable)
+
+            if expanded {
+                ForEach(Section.available(on: cluster)) { item in
+                    SectionRow(section: item, active: active == item, indented: true) { open(item) }
+                }
+            }
+        }
     }
 }
 
 private struct ClusterRow: View {
     let cluster: ManagedCluster
     let selected: Bool
+    let expanded: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 8) {
+                // The disclosure is drawn, not pressed: the whole row is the
+                // button, and a second tap on the selected row is what folds it.
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(cluster.isUsable ? Theme.faint : .clear)
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                    .frame(width: 10)
                 StatusDot(color: dotColor, glow: reachable)
                 Text(cluster.displayName)
                     .font(.system(size: 13, weight: .semibold))
@@ -209,9 +344,9 @@ private struct ClusterRow: View {
                 .font(Theme.mono(10.5))
                 .foregroundStyle(reachable ? Theme.muted : Theme.faint)
                 .lineLimit(1)
-                .padding(.leading, 15)
+                .padding(.leading, 33)
             if !cluster.roles.isEmpty {
-                HStack(spacing: 5) {
+                TagFlow(spacing: 5) {
                     ForEach(cluster.roles.sorted(), id: \.self) { role in
                         tag(role.rawValue)
                     }
@@ -223,10 +358,10 @@ private struct ClusterRow: View {
                             tone: edition == .enterprise ? Theme.ember : Theme.muted)
                     }
                 }
-                .padding(.leading, 15)
+                .padding(.leading, 33)
             }
         }
-        .padding(.horizontal, 10).padding(.vertical, 9)
+        .padding(.horizontal, 8).padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(selected ? Theme.secondary : .clear, in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(selected ? Theme.border : .clear))
@@ -236,6 +371,7 @@ private struct ClusterRow: View {
     private func tag(_ text: String, tone: Color = Theme.muted) -> some View {
         Text(text)
             .font(.system(size: 10, weight: .semibold)).kerning(0.4)
+            .lineLimit(1).fixedSize()
             .foregroundStyle(tone)
             .padding(.horizontal, 5).padding(.vertical, 1)
             .background(tone == Theme.muted ? Theme.mutedBg : tone.opacity(0.1),
@@ -257,13 +393,58 @@ private struct ClusterRow: View {
         }
     }
 
+    /// One line, and a short one: the sentence that says why lives on the
+    /// Cluster screen, where there is room to read it.
     private var subtitle: String {
         switch cluster.reach {
         case .reachable(let v, _, _): return "\(cluster.context.server.host() ?? "") · \(v)"
         case .unprobed:               return cluster.context.server.host() ?? ""
-        case .unreachable:            return "no route from this iPad"
-        case .unusable:               return "credentials iOS cannot use"
+        case .unreachable:            return "no route"
+        case .unusable:               return "credentials this app cannot use"
         }
+    }
+}
+
+/// Badges laid out left to right, and onto a new line when the row is full.
+///
+/// An `HStack` in a 268 pt column breaks the third badge in the middle of its
+/// word — `k0rdent-` over `managed` — which reads as two badges. Wrapping the
+/// whole badge is what a row of tags is expected to do.
+private struct TagFlow: Layout {
+    var spacing: CGFloat = 5
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(in: proposal.width ?? .infinity, subviews: subviews)
+        return CGSize(width: proposal.width ?? rows.map(\.width).max() ?? 0,
+                      height: rows.reduce(0) { $0 + $1.height } + spacing * CGFloat(max(rows.count - 1, 0)))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in arrange(in: bounds.width, subviews: subviews) {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y), proposal: .unspecified)
+                x += size.width + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private struct Row { var indices: [Int] = []; var width: CGFloat = 0; var height: CGFloat = 0 }
+
+    private func arrange(in width: CGFloat, subviews: Subviews) -> [Row] {
+        var rows: [Row] = [Row()]
+        for (index, view) in subviews.enumerated() {
+            let size = view.sizeThatFits(.unspecified)
+            let needed = rows[rows.count - 1].width + (rows[rows.count - 1].indices.isEmpty ? 0 : spacing) + size.width
+            if needed > width, !rows[rows.count - 1].indices.isEmpty { rows.append(Row()) }
+            rows[rows.count - 1].indices.append(index)
+            rows[rows.count - 1].width += (rows[rows.count - 1].indices.count == 1 ? 0 : spacing) + size.width
+            rows[rows.count - 1].height = max(rows[rows.count - 1].height, size.height)
+        }
+        return rows
     }
 }
 

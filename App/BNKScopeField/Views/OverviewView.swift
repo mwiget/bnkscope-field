@@ -27,7 +27,14 @@ struct OverviewView: View {
                     VStack(spacing: 14) {
                         ForEach(overview.reports) { report in
                             ReportCard(report: report,
-                                       select: { store.selected = report.id },
+                                       // Both halves. Selecting alone changed a
+                                       // highlight in the sidebar and left this
+                                       // screen where it was — which in a
+                                       // window narrow enough to hide the
+                                       // sidebar looked like a button that did
+                                       // nothing.
+                                       select: { store.selected = report.id
+                                                 navigator.section = .cluster },
                                        open: { finding in
                                            store.selected = report.id
                                            navigator.reveal(pod: finding.pod ?? "",

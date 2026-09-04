@@ -84,7 +84,6 @@ final class DemoDrive: XCTestCase {
     /// cut lands on the cluster appearing instead. The import itself is real;
     /// only the file-browsing is off camera.
     func beat2ImportTap() throws {
-        goTo("Clusters")
         dwell(Beat.read)
         tap("Import kubeconfig")
         dwell(2.0)
@@ -95,15 +94,17 @@ final class DemoDrive: XCTestCase {
             candidate.tap()
             break
         }
-        // Rest on the empty Clusters screen. The next take is the same screen
-        // with a cluster in it, and the two are crossfaded — so this take has to
-        // end somewhere the other one can be dissolved into.
+        // Rest on the empty Overview. The next take is the cluster that the
+        // import produced, and the two are crossfaded — so this take has to end
+        // somewhere the other one can be dissolved into.
         dwell(10.0)
     }
 
-    /// The other half: a cluster that has just been imported and probed.
+    /// The other half: a cluster that has just been imported and probed. The
+    /// import selects it, which opens it in the sidebar; its own screen is the
+    /// first row under it.
     func beat2ImportResult() throws {
-        goTo("Clusters")
+        goTo("Cluster")
         dwell(Beat.settle)
     }
 
@@ -165,8 +166,18 @@ final class DemoDrive: XCTestCase {
         dwell(Beat.hold7)
     }
 
+    /// NICo is under the cluster that runs it, so that cluster is opened first.
+    /// Its row is found by the badge rather than by name — the lab's name does
+    /// not belong in the repository — and only the row carries the badge until
+    /// it is open: once it is, a "NICo" screen row appears beneath it, and that
+    /// one matches the exact label.
     func beat8NICo() throws {
-        goTo("Clusters")
+        let row = app.buttons.containing(NSPredicate(format: "label CONTAINS 'NICo'")).firstMatch
+        guard row.waitForExistence(timeout: 20) else {
+            XCTFail("no cluster with the NICo badge")
+            return
+        }
+        row.tap()
         dwell(Beat.read)
         goTo("NICo")
         dwell(Beat.settle)

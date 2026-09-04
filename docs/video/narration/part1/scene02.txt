@@ -1,0 +1,1 @@
+It starts with nothing in it. One kubeconfig goes in — and this one holds three contexts.

@@ -5,6 +5,13 @@ An iPad and Mac front end for
 directly from the device. No Docker, no server, no bnkscope instance to point
 at.
 
+**Watch it** (unlisted — anyone with the link can view):
+**[bnkscope Field on macOS](https://youtu.be/csPt0KHbl3Y)** (2:38) — three
+clusters imported from one kubeconfig, an exporter injected into a running TMM
+pod, live telemetry, commands in the debug and routing containers, and the log
+stream filtered. A live lab, not a mock-up, and recorded by a script rather than
+by hand: see [`docs/video/`](docs/video/).
+
 ## What it is
 
 Point it at a kubeconfig and it becomes a live view of a BNK cluster: TMM CPU,
@@ -102,6 +109,25 @@ swift build
 .build/debug/bnkfield scrape   ~/.kube/config my-context dpf-operator-system <tmm-pod> 9099
 ```
 
+**On a Mac, do not point those at a kubeconfig the app is also using.** `contexts`
+is safe — it parses YAML and never opens a connection. Every other command builds
+a `KubeClient`, and for a client-certificate context that means `Identity`
+importing the key into the login keychain. It clears the old entries first, and
+one of those deletes matches on the public key's SHA-1 rather than on the tag:
+
+```swift
+SecItemDelete(scoped([kSecClass: kSecClassKey, kSecAttrApplicationLabel: keyHash]))
+```
+
+Same key, same hash — so it finds the app's item too, whatever tag it was filed
+under. Whichever binary adds the key back owns the ACL, and the other one starts
+failing `PRIVATE_KEY_OPERATION_FAILED` on every request. Recovery is
+`security delete-identity -Z <sha1>` and a re-import from the app.
+
+So use a copy of the kubeconfig under a different context name, or run it
+somewhere without a keychain. On Linux the problem does not arise, which is the
+other reason this command-line front end is worth keeping.
+
 The app itself builds for both platforms from the one target:
 
 ```
@@ -196,6 +222,28 @@ wrong and are commented in `Identity.swift`: the key needs its
 the identity must be matched back by certificate bytes rather than by label — a
 label query returns whatever identity the keychain feels like, which on a
 developer's Mac is their Xcode signing identity.
+
+## The video
+
+[`docs/video/`](docs/video/) builds the walkthrough above, and nothing in it is
+performed by hand:
+
+| | |
+|---|---|
+| `record-macos.sh` | drives the real app with XCUITest and films one take per beat with `screencapture`, cropping to the window and normalising to 1080p |
+| `../App/BNKScopeFieldUITests/DemoDrive.swift` | the beats themselves — one test method each, so a fumbled one is re-shot on its own |
+| `make-slides.sh` | renders the title and close slides from F5's corporate template, on a host that has LibreOffice |
+| `build-video.sh` | cuts every take to the length of the narration line played over it, and assembles |
+| `narration/` | the script; the voice is synthesised from a reference clip on a GPU host |
+| `publish/youtube.yaml` | title, description and chapters |
+
+The template is deliberately not vendored: it is an internal F5 asset and this
+repo is public, so `make-slides.sh` reads it from a sibling checkout and removes
+it from the render host afterwards. `tools/card.swift` draws plain cards instead
+when it is not there.
+
+Re-recording is a command, not an afternoon, which is the point: a narration
+rewrite does not mean filming the app again.
 
 ## Layout
 

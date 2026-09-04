@@ -1,0 +1,6 @@
+# Takes and intermediates are large and reproducible: record-macos.sh rebuilds
+# them from the driver, which is what is version controlled.
+build/
+takes/
+*.mov
+*.mp4

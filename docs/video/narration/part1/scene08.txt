@@ -1,0 +1,1 @@
+Terminal is exec into a running pod. These are tmctl commands against the debug container: connection counts first, then the interface counters, straight out of the dataplane.

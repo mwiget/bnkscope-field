@@ -1,0 +1,1 @@
+Logs stream over the same transport, and the filter narrows them live. It is the ordinary thing you want at three in the morning, without a terminal, a kubeconfig on the laptop, or a VPN.

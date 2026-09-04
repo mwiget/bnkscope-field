@@ -16,6 +16,7 @@ on:
     # those should produce a release that carries them.
     paths-ignore:
       - README.md
+      - CLAUDE.md
       - docs/**
   workflow_dispatch:
 

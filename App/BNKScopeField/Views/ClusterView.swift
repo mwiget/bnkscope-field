@@ -22,7 +22,7 @@ struct ClusterView: View {
             } else {
                 Message(title: store.clusters.isEmpty ? "No kubeconfigs yet" : "No cluster selected",
                         detail: store.clusters.isEmpty
-                            ? "Import one from the sidebar. Field needs a context with a client certificate or a bearer token — anything that shells out to aws, gcloud or kubelogin cannot be used on iOS."
+                            ? "Import one \(ManagedCluster.importSource). Field needs a context with a client certificate or a bearer token — anything that shells out to aws, gcloud or kubelogin cannot be used here."
                             : "Pick one in the sidebar.")
             }
         }

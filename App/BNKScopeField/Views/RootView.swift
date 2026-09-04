@@ -333,6 +333,10 @@ private struct ClusterRow: View {
                     .foregroundStyle(cluster.isUsable ? Theme.faint : .clear)
                     .rotationEffect(.degrees(expanded ? 90 : 0))
                     .frame(width: 10)
+                    // The demo driver finds a cluster row by the prefix of its
+                    // label, which is the row's text run together. A symbol
+                    // at the front would put its own name there first.
+                    .accessibilityHidden(true)
                 StatusDot(color: dotColor, glow: reachable)
                 Text(cluster.displayName)
                     .font(.system(size: 13, weight: .semibold))

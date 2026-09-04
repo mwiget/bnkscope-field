@@ -1,0 +1,1 @@
+Three clusters, and this is a live lab. Each is probed as it arrives: whether it answers, what version it runs, and what it is. Two are BNK clusters, one of them also carries DPUs, and the third runs NICo.

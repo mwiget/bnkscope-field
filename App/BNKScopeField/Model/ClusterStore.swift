@@ -250,9 +250,11 @@ final class ManagedCluster: Identifiable {
     #if os(macOS)
     static let thisDevice = "this Mac"
     static let localNetworkSetting = "System Settings › Privacy & Security › Local Network"
+    static let importSource = "from Finder"
     #else
     static let thisDevice = "this iPad"
     static let localNetworkSetting = "Settings › Privacy & Security › Local Network"
+    static let importSource = "from Files"
     #endif
 }
 

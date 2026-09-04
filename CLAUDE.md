@@ -16,6 +16,31 @@ xcodebuild -project App/BNKScopeField.xcodeproj -scheme BNKScopeField \
   -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5)' build
 ```
 
+### Dart port (`dart/bnk_kit`)
+
+The Flutter build starts here. `bnk_kit` is `BNKKit` ported to Dart with the
+same layering, no Flutter dependency, and a `bnkfield` CLI with the same
+twelve commands. It needs the Dart SDK that ships with Flutter
+(`brew install --cask flutter`).
+
+```bash
+cd dart/bnk_kit
+dart pub get && dart analyze && dart test     # 71 cases, no cluster needed
+dart run bin/bnkfield.dart probe <kubeconfig> <context>
+dart compile exe bin/bnkfield.dart -o bnkfield
+```
+
+**The keychain warning below does not apply to the Dart CLI.** dart:io takes
+the client certificate and key as the PEM bytes from the kubeconfig and never
+files anything in a keychain, so `bnkfield.dart` can be pointed at the app's
+own kubeconfigs under `Application Support/kubeconfigs`. Two facts that were
+learned the hard way: `HttpClient.connectionFactory` must return an already
+secured socket for https, which is how `tls-server-name` is honoured; and on
+macOS/iOS Dart verifies chains through Security.framework, which refuses a
+server certificate valid for more than 825 days (the test fixtures are issued
+for 800). `test/transport_test.dart` runs a fake apiserver on loopback and
+covers mutual TLS, the CA pin, port-forward framing, exec and logs.
+
 **Open `App/BNKScopeField.xcodeproj`, not `Package.swift`.** The package window
 lists only `bnkfield`, `BNKKit` and `bnkscope-field-Package`; the app target is
 not in it, because `Package.swift` does not reference the `.xcodeproj`. Symptom

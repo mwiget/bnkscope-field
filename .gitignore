@@ -23,3 +23,7 @@ kubeconfigs/
 docs/video/build/
 docs/video/takes/
 docs/video/kit/voice/
+
+# Dart / Flutter
+.dart_tool/
+dart/**/build/

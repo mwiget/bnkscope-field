@@ -18,6 +18,8 @@ on:
       - README.md
       - CLAUDE.md
       - docs/**
+      # The Dart port has its own build; it does not change the Mac binary.
+      - dart/**
   workflow_dispatch:
 
 permissions:

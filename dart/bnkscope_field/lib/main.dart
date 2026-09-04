@@ -23,6 +23,9 @@ Future<void> main() async {
   unawaited(store.load().then((_) async {
     openWhereAsked(engines);
     await store.probeAll();
+    // Again, now that probing has said which screens the cluster has: a
+    // screen asked for before the roles were known was sent back to Cluster.
+    openWhereAsked(engines);
   }));
   runApp(FieldApp(engines: engines));
 }

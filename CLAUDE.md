@@ -35,11 +35,10 @@ packages, no Flutter dependency in either, so everything below runs with
   `lib/platform.dart` is the *entire* platform divergence, the Flutter
   `Portable.swift`; `lib/observe.dart` is the one adapter from an engine's
   `changes` stream to a widget rebuild; `lib/theme.dart` carries the web
-  UI's tokens and the mark. Screens live in `lib/screens/`, one file each,
-  and a screen not yet ported shows `PlaceholderScreen` rather than
-  pretending. Model names that clash with Flutter's were renamed on the
-  kit side (`PodContainer`, `ScrapeStatus`) or the widget side (`Pill`,
-  `Panel`). Charts are drawn by `lib/chart.dart`'s own painter (monotone
+  UI's tokens and the mark. Every screen of the Swift app is ported, one
+  file each in `lib/screens/`. Model names that clash with Flutter's were
+  renamed on the kit side (`PodContainer`, `ScrapeStatus`) or the widget
+  side (`Pill`, `Panel`, `Notice`, `Choice`). Charts are drawn by `lib/chart.dart`'s own painter (monotone
   cubic, gaps kept as gaps, fixed domain where the quantity has one); no
   charting package. To open the app on a given screen for a screenshot,
   launch the binary with `BNK_SECTION=tmmLive BNK_CLUSTER=<display name>`.
@@ -52,7 +51,7 @@ brew install --cask flutter            # brings the Dart SDK
 cd dart && dart pub get && dart analyze
 (cd bnk_kit && dart test)              # 71 cases
 (cd bnk_engines && dart test)          # 27 cases, engines driven through the fake apiserver
-(cd bnkscope_field && flutter analyze && flutter test && flutter build macos --debug)
+(cd bnkscope_field && flutter analyze && flutter test && flutter build macos --debug)   # 9 widget tests, four of them against the fake apiserver
 dart run bnk_kit/bin/bnkfield.dart probe <kubeconfig> <context>
 (cd bnk_kit && dart compile exe bin/bnkfield.dart -o bnkfield)
 ```

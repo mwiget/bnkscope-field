@@ -119,6 +119,16 @@ class FakeApiserver {
         pod('coredns', 'kube-system', labels: {'k8s-app': 'kube-dns'}),
       ];
 
+  List<Map<String, Object>> get events => [
+        {'metadata': {'name': 'e1', 'namespace': 'ns'}, 'type': 'Warning', 'reason': 'BackOff',
+          'message': '(combined from similar events): Back-off restarting failed container',
+          'count': 12, 'lastTimestamp': DateTime.now().toUtc().toIso8601String(),
+          'involvedObject': {'kind': 'Pod', 'name': 'broken', 'namespace': 'ns'}},
+        {'metadata': {'name': 'e2', 'namespace': 'ns'}, 'type': 'Warning', 'reason': 'Old',
+          'message': 'long ago', 'lastTimestamp': '2020-01-01T00:00:00Z',
+          'involvedObject': {'kind': 'Pod', 'name': 'tmm-a', 'namespace': 'ns'}},
+      ];
+
   Future<void> _handle(HttpRequest request) async {
     final path = request.uri.path;
     final query = request.uri.queryParameters;
@@ -171,22 +181,22 @@ class FakeApiserver {
       case '/api/v1/namespaces/ns/pods':
         await json({'items': [for (final p in pods) if ((p['metadata'] as Map)['namespace'] == 'ns') p]});
       case '/api/v1/events':
-        await json({'items': [
-          {'metadata': {'name': 'e1', 'namespace': 'ns'}, 'type': 'Warning', 'reason': 'BackOff',
-            'message': '(combined from similar events): Back-off restarting failed container',
-            'count': 12, 'lastTimestamp': DateTime.now().toUtc().toIso8601String(),
-            'involvedObject': {'kind': 'Pod', 'name': 'broken', 'namespace': 'ns'}},
-          {'metadata': {'name': 'e2', 'namespace': 'ns'}, 'type': 'Warning', 'reason': 'Old',
-            'message': 'long ago', 'lastTimestamp': '2020-01-01T00:00:00Z',
-            'involvedObject': {'kind': 'Pod', 'name': 'tmm-a', 'namespace': 'ns'}},
-        ]});
+        await json({'items': events});
       case '/forbidden':
         request.response
           ..statusCode = 403
           ..write('{"kind":"Status","message":"pods is forbidden"}');
         await request.response.close();
       default:
-        if (path.endsWith('/log')) {
+        if (path.endsWith('/events')) {
+          // `/api/v1/namespaces/<ns>/events?fieldSelector=involvedObject.name=<name>`
+          final selector = query['fieldSelector'] ?? '';
+          final name = selector.startsWith('involvedObject.name=') ? selector.substring('involvedObject.name='.length) : null;
+          await json({'items': [
+            for (final e in events)
+              if (name == null || ((e['involvedObject'] as Map)['name'] == name)) e
+          ]});
+        } else if (path.endsWith('/log')) {
           request.response.headers.contentType = ContentType.text;
           request.response.write('2026-09-04T03:23:18.000000001Z first line\n');
           await request.response.flush();

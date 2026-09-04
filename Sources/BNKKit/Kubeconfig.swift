@@ -136,12 +136,15 @@ public struct Kubeconfig: Sendable {
     // MARK: - Auth
 
     static func auth(from user: [String: Any]) -> Auth {
-        // exec: and auth-provider: both mean "run this program", which iOS cannot
-        // do. Name the binary in the reason — the user has to replace it with a
+        // exec: and auth-provider: both mean "run this program", which this app
+        // does not do — on any platform. The rule is the app's, not the OS's,
+        // and the wording says so: this file is shared with the Mac build and
+        // the Linux CLI, and "iOS runs no binaries" was being shown on a Mac.
+        // Name the binary in the reason — the user has to replace it with a
         // certificate or a token, and needs to know which one is in the way.
         if let exec = user["exec"] as? [String: Any] {
             let cmd = (exec["command"] as? String) ?? "an external command"
-            return .unsupported(reason: "needs `\(cmd)`, and iOS runs no binaries — supply a client certificate or a bearer token instead")
+            return .unsupported(reason: "needs `\(cmd)`, and this app runs no binaries — supply a client certificate or a bearer token instead")
         }
         if let provider = user["auth-provider"] as? [String: Any] {
             let name = (provider["name"] as? String) ?? "an auth provider"

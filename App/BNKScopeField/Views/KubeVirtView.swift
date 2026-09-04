@@ -126,7 +126,6 @@ private struct MachineRow: View {
     let machine: KubeVirt.Machine
     @Environment(ClusterStore.self) private var store
     @Environment(KubeVirtEngine.self) private var kubevirt
-    @Environment(Navigator.self) private var navigator
     /// Set by Stop and Restart, which interrupt a running machine. Start is
     /// additive and asks nothing.
     ///
@@ -186,6 +185,14 @@ private struct MachineRow: View {
                     if let link = iface.linkState {
                         StatusDot(color: link == "up" ? Theme.ok : Theme.bad, size: 6)
                     }
+                    // What the attachment definition and the CNI added: for a
+                    // VF, the resource it was claimed as and the PCI address it
+                    // got — the two things that tie a machine's NIC to a card.
+                    if !iface.details.isEmpty {
+                        Text(iface.details.joined(separator: " · "))
+                            .font(Theme.mono(11))
+                            .foregroundStyle(iface.binding == .sriov ? Theme.muted : Theme.faint)
+                    }
                     Spacer(minLength: 0)
                 }
                 .lineLimit(1)
@@ -216,11 +223,6 @@ private struct MachineRow: View {
                 .lineLimit(1)
             }
 
-            if machine.vmi != nil {
-                Button("launcher pod") { revealLauncher() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.primary)
-            }
 
             if let failure = kubevirt.actionFailure, failure.id == machine.id {
                 Text(failure.why).font(.system(size: 11.5)).foregroundStyle(Theme.bad)
@@ -287,17 +289,6 @@ private struct MachineRow: View {
     private func run(_ action: KubeVirt.Action) {
         guard let cluster = store.current else { return }
         Task { await kubevirt.perform(action, on: machine, cluster: cluster) }
-    }
-
-    /// The pod that is this machine, opened in Resources — where its logs
-    /// and a shell are one tap further.
-    private func revealLauncher() {
-        guard let cluster = store.current else { return }
-        Task {
-            if let pod = await kubevirt.launcherPod(of: machine, cluster: cluster) {
-                navigator.reveal(pod: pod, namespace: machine.namespace)
-            }
-        }
     }
 
     /// `q35 · host-model · 4Gi of 16Gi · up 6h`, or as much of it as is known.

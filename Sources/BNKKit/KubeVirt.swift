@@ -339,10 +339,36 @@ public enum KubeVirt {
             public let mac: String?
             public let linkState: String?
             public let addresses: [String]
+            /// What the attachment definition says the network is, when one
+            /// was found for it.
+            public let attachment: KubeVirt.NetworkAttachment?
+            /// The device the launcher pod was handed, when the CNI reported
+            /// one — a VF's PCI address.
+            public let device: KubeVirt.PodNetwork.Device?
             public var id: String { name }
+
+            /// The facts past the MAC, in the order they are asked for. For a
+            /// VF: the resource it was claimed as, its PCI address, the PF it
+            /// was cut from, VLAN and MTU. For a bridge: the bridge, and the
+            /// VLAN and MTU when set.
+            public var details: [String] {
+                var out: [String] = []
+                if let resource = attachment?.resourceName { out.append(resource) }
+                if let pci = device?.pciAddress { out.append("PCI \(pci)") }
+                if let pf = device?.pfAddress { out.append("PF \(pf)") }
+                if let bridge = attachment?.bridge { out.append("br \(bridge)") }
+                if let vlan = attachment?.vlan, vlan != 0 { out.append("VLAN \(vlan)") }
+                if let mtu = attachment?.mtu { out.append("MTU \(mtu)") }
+                if let type = attachment?.type, attachment?.resourceName == nil, attachment?.bridge == nil {
+                    out.append(type)
+                }
+                return out
+            }
         }
 
-        public static func interfaces(spec: Spec?, status: Status?) -> [InterfaceSummary] {
+        public static func interfaces(spec: Spec?, status: Status?, namespace: String = "default",
+                                      attachments: [KubeVirt.NetworkAttachment] = [],
+                                      podNetworks: [KubeVirt.PodNetwork] = []) -> [InterfaceSummary] {
             var networks: [String: Network] = [:]
             for n in spec?.networks ?? [] where networks[n.name] == nil { networks[n.name] = n }
             var reported: [String: InterfaceStatus] = [:]
@@ -350,11 +376,24 @@ public enum KubeVirt {
             return (spec?.domain?.devices?.interfaces ?? []).map { iface in
                 let live = reported[iface.name]
                 let addresses = live?.ipAddresses ?? live?.ipAddress.map { [$0] } ?? []
+                let network = networks[iface.name]
+                // Multus names an attachment `name` for the machine's own
+                // namespace and `namespace/name` for another's.
+                let qualified = network?.multus?.networkName.map { ref -> String in
+                    ref.contains("/") ? ref : "\(namespace)/\(ref)"
+                }
+                let attachment = qualified.flatMap { q in attachments.first { $0.id == q } }
+                // The CNI reports on the pod's side of the interface, so the
+                // pod interface name is the join; the attachment name is the
+                // fallback for a runtime that did not fill it in.
+                let pod = podNetworks.first { $0.interface != nil && $0.interface == live?.podInterfaceName }
+                    ?? qualified.flatMap { q in podNetworks.first { $0.name == q } }
                 return InterfaceSummary(name: iface.name, binding: iface.binding,
                                         describedBinding: iface.describedBinding,
-                                        network: networks[iface.name]?.described ?? "—",
+                                        network: network?.described ?? "—",
                                         mac: live?.mac ?? iface.macAddress, linkState: live?.linkState,
-                                        addresses: addresses.filter { !$0.isEmpty })
+                                        addresses: addresses.filter { !$0.isEmpty },
+                                        attachment: attachment, device: pod?.device)
             }
         }
 
@@ -390,6 +429,16 @@ public enum KubeVirt {
         public let name: String
         public let vm: VirtualMachine?
         public let vmi: VirtualMachineInstance?
+        /// The attachment definitions this machine's networks name.
+        public let attachments: [NetworkAttachment]
+        /// What the CNI told the launcher pod about each of its interfaces.
+        public let podNetworks: [PodNetwork]
+
+        public init(namespace: String, name: String, vm: VirtualMachine?, vmi: VirtualMachineInstance?,
+                    attachments: [NetworkAttachment] = [], podNetworks: [PodNetwork] = []) {
+            self.namespace = namespace; self.name = name; self.vm = vm; self.vmi = vmi
+            self.attachments = attachments; self.podNetworks = podNetworks
+        }
 
         public var id: String { "\(namespace)/\(name)" }
 
@@ -444,11 +493,118 @@ public enum KubeVirt {
             VirtualMachineInstance.disks(spec: spec, status: vmi?.status)
         }
         public var interfaces: [VirtualMachineInstance.InterfaceSummary] {
-            VirtualMachineInstance.interfaces(spec: spec, status: vmi?.status)
+            VirtualMachineInstance.interfaces(spec: spec, status: vmi?.status, namespace: namespace,
+                                              attachments: attachments, podNetworks: podNetworks)
         }
         /// Whether a stop throws the root filesystem away.
         public var bootsFromEphemeralDisk: Bool {
             VirtualMachineInstance.bootDisk(disks)?.isEphemeral == true
+        }
+    }
+
+    /// A Multus NetworkAttachmentDefinition, reduced to what a machine's row
+    /// wants to know about the network it is attached to.
+    ///
+    /// The definition's `spec.config` is a CNI config as a JSON *string*, and
+    /// a conflist wraps the real plugin in `plugins[0]`. What is worth reading
+    /// out of it: the plugin type, the bridge for a bridge plugin, VLAN and
+    /// MTU where set. The one fact that is not in the config is the most
+    /// important for a VF — the extended resource the VF is claimed as lives
+    /// in an annotation on the definition, `k8s.v1.cni.cncf.io/resourceName`.
+    public struct NetworkAttachment: Sendable, Identifiable {
+        public let namespace: String
+        public let name: String
+        public let type: String?
+        public let resourceName: String?
+        public let bridge: String?
+        public let vlan: Int?
+        public let mtu: Int?
+
+        public var id: String { "\(namespace)/\(name)" }
+
+        public init(namespace: String, name: String, type: String? = nil, resourceName: String? = nil,
+                    bridge: String? = nil, vlan: Int? = nil, mtu: Int? = nil) {
+            self.namespace = namespace; self.name = name; self.type = type
+            self.resourceName = resourceName; self.bridge = bridge; self.vlan = vlan; self.mtu = mtu
+        }
+
+        /// As the apiserver serves it.
+        public struct Object: Decodable, Sendable {
+            public let metadata: K8s.ObjectMeta
+            public let spec: Spec?
+            public struct Spec: Decodable, Sendable { public let config: String? }
+        }
+
+        public init(_ object: Object) {
+            namespace = object.metadata.namespace ?? "default"
+            name = object.metadata.name
+            resourceName = object.metadata.annotations?["k8s.v1.cni.cncf.io/resourceName"]
+            var plugin: [String: Any] = [:]
+            if let text = object.spec?.config, let data = text.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                plugin = (json["plugins"] as? [[String: Any]])?.first ?? json
+            }
+            type = plugin["type"] as? String
+            bridge = plugin["bridge"] as? String
+            vlan = plugin["vlan"] as? Int
+            mtu = plugin["mtu"] as? Int
+        }
+    }
+
+    /// One entry of a launcher pod's `k8s.v1.cni.cncf.io/network-status`
+    /// annotation: what the CNI actually gave the pod on one interface.
+    ///
+    /// This is where a VF's PCI address is. The machine's own status says the
+    /// interface exists and is up; only the CNI knows which function on which
+    /// card it is, and it says so in `device-info` on the pod, not on the VMI.
+    public struct PodNetwork: Decodable, Sendable {
+        /// `namespace/attachment`, or the cluster network's own name.
+        public let name: String
+        /// The pod-side interface: `net1`, `pod822b33ad87c`, `eth0`.
+        public let interface: String?
+        public let ips: [String]?
+        public let mac: String?
+        public let device: Device?
+
+        public struct Device: Decodable, Sendable {
+            public let type: String?
+            public let pciAddress: String?
+            public let pfAddress: String?
+
+            private enum Keys: String, CodingKey { case type, pci }
+            private enum PCIKeys: String, CodingKey {
+                case pciAddress = "pci-address", pfAddress = "pf-pci-address"
+            }
+            public init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: Keys.self)
+                type = try c.decodeIfPresent(String.self, forKey: .type)
+                if c.contains(.pci) {
+                    let pci = try c.nestedContainer(keyedBy: PCIKeys.self, forKey: .pci)
+                    pciAddress = try pci.decodeIfPresent(String.self, forKey: .pciAddress)
+                    pfAddress = try pci.decodeIfPresent(String.self, forKey: .pfAddress)
+                } else {
+                    pciAddress = nil; pfAddress = nil
+                }
+            }
+        }
+
+        private enum Keys: String, CodingKey { case name, interface, ips, mac, device = "device-info" }
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: Keys.self)
+            name = try c.decode(String.self, forKey: .name)
+            interface = try c.decodeIfPresent(String.self, forKey: .interface)
+            ips = try c.decodeIfPresent([String].self, forKey: .ips)
+            mac = try c.decodeIfPresent(String.self, forKey: .mac)
+            device = try c.decodeIfPresent(Device.self, forKey: .device)
+        }
+
+        public static let annotation = "k8s.v1.cni.cncf.io/network-status"
+
+        /// The annotation's value, parsed. Absent or malformed reads as empty
+        /// — a pod on the cluster network alone has nothing to say here.
+        public static func parse(_ text: String?) -> [PodNetwork] {
+            guard let text, let data = text.data(using: .utf8) else { return [] }
+            return (try? KubeClient.decoder.decode([PodNetwork].self, from: data)) ?? []
         }
     }
 
@@ -479,27 +635,64 @@ extension KubeClient {
                           "/apis/\(groupVersion)/virtualmachineinstances").items
     }
 
-    /// Both kinds, paired by name.
+    /// Every Multus attachment definition on the cluster. Empty, not an error,
+    /// on a cluster without Multus — the group is simply not served there.
+    public func networkAttachments() async throws -> [KubeVirt.NetworkAttachment] {
+        try await getJSON(K8s.List<KubeVirt.NetworkAttachment.Object>.self,
+                          "/apis/k8s.cni.cncf.io/v1/network-attachment-definitions")
+            .items.map(KubeVirt.NetworkAttachment.init)
+    }
+
+    /// What the CNI reported to each launcher pod, keyed by the machine's
+    /// `namespace/name`.
+    ///
+    /// The launcher is the pod that *is* the machine, and it carries the
+    /// machine's name in its `kubevirt.io/domain` annotation; the VMI's own
+    /// `status.activePods` maps UIDs to nodes and never names the pod.
+    public func launcherNetworks() async throws -> [String: [KubeVirt.PodNetwork]] {
+        var out: [String: [KubeVirt.PodNetwork]] = [:]
+        for pod in try await pods(labelSelector: "kubevirt.io=virt-launcher") {
+            guard let domain = pod.metadata.annotations?["kubevirt.io/domain"] else { continue }
+            let key = "\(pod.metadata.namespace ?? "default")/\(domain)"
+            out[key] = KubeVirt.PodNetwork.parse(pod.metadata.annotations?[KubeVirt.PodNetwork.annotation])
+        }
+        return out
+    }
+
+    /// Both kinds, paired by name, with what their networks are attached to.
     ///
     /// Paired on namespace and name rather than on the instance's owner
     /// reference: a VMI created by hand has no owner, and dropping the unowned
     /// ones would hide exactly the machines that most need looking at.
+    ///
+    /// The attachment definitions and the launcher pods are read alongside,
+    /// and either failing costs the detail, not the list — a cluster without
+    /// Multus has no definitions to read and still has machines.
     public func machines(groupVersion: String) async throws -> [KubeVirt.Machine] {
         async let vmsTask = virtualMachines(groupVersion: groupVersion)
         async let vmisTask = virtualMachineInstances(groupVersion: groupVersion)
+        async let attachmentsTask = (try? networkAttachments()) ?? []
+        async let launchersTask = (try? launcherNetworks()) ?? [:]
         let (vms, vmis) = try await (vmsTask, vmisTask)
+        let (attachments, launchers) = await (attachmentsTask, launchersTask)
 
-        var byID: [String: KubeVirt.Machine] = [:]
-        for vm in vms {
-            byID[vm.id] = KubeVirt.Machine(namespace: vm.metadata.namespace ?? "default",
-                                           name: vm.metadata.name, vm: vm, vmi: nil)
+        var byID: [String: (vm: KubeVirt.VirtualMachine?, vmi: KubeVirt.VirtualMachineInstance?)] = [:]
+        for vm in vms { byID[vm.id] = (vm, nil) }
+        for vmi in vmis { byID[vmi.id] = (byID[vmi.id]?.vm, vmi) }
+
+        return byID.map { id, pair in
+            let namespace = (pair.vmi?.metadata.namespace ?? pair.vm?.metadata.namespace) ?? "default"
+            let name = (pair.vmi?.metadata.name ?? pair.vm?.metadata.name) ?? id
+            // Only the definitions this machine names, resolved the way
+            // Multus resolves them: bare names are in the machine's namespace.
+            let networks = pair.vmi?.spec?.networks ?? pair.vm?.spec?.template?.spec?.networks ?? []
+            let wanted = Set(networks.compactMap { $0.multus?.networkName }
+                .map { $0.contains("/") ? $0 : "\(namespace)/\($0)" })
+            return KubeVirt.Machine(namespace: namespace, name: name, vm: pair.vm, vmi: pair.vmi,
+                                    attachments: attachments.filter { wanted.contains($0.id) },
+                                    podNetworks: launchers[id] ?? [])
         }
-        for vmi in vmis {
-            let existing = byID[vmi.id]
-            byID[vmi.id] = KubeVirt.Machine(namespace: vmi.metadata.namespace ?? "default",
-                                            name: vmi.metadata.name, vm: existing?.vm, vmi: vmi)
-        }
-        return byID.values.sorted { ($0.namespace, $0.name) < ($1.namespace, $1.name) }
+        .sorted { ($0.namespace, $0.name) < ($1.namespace, $1.name) }
     }
 
     /// Start, stop or restart a `VirtualMachine`.

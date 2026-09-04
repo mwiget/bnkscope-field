@@ -606,6 +606,82 @@ struct KubeVirtTests {
         #expect(machine.bootsFromEphemeralDisk)
     }
 
+    /// The definition's config is JSON inside a string, sometimes a conflist,
+    /// and the VF's resource is not in it at all — it is an annotation.
+    @Test func readsAttachmentDefinitions() throws {
+        let json = """
+        {"items": [
+          {"metadata": {"name": "tenant-a", "namespace": "default"},
+           "spec": {"config": "{\\"cniVersion\\":\\"0.3.1\\",\\"type\\":\\"bridge\\",\\"bridge\\":\\"br-acme\\",\\"mtu\\":9000,\\"macspoofchk\\":false}"}},
+          {"metadata": {"name": "sf-vf", "namespace": "default",
+                        "annotations": {"k8s.v1.cni.cncf.io/resourceName": "nvidia.com/bf_sf"}},
+           "spec": {"config": "{\\"cniVersion\\":\\"0.3.1\\",\\"name\\":\\"sf\\",\\"plugins\\":[{\\"type\\":\\"sriov\\",\\"vlan\\":100,\\"spoofchk\\":\\"off\\"},{\\"type\\":\\"tuning\\"}]}"}}
+        ]}
+        """
+        let list = try KubeClient.decoder.decode(K8s.List<KubeVirt.NetworkAttachment.Object>.self,
+                                                 from: Data(json.utf8))
+        let nads = list.items.map(KubeVirt.NetworkAttachment.init)
+        #expect(nads[0].type == "bridge")
+        #expect(nads[0].bridge == "br-acme")
+        #expect(nads[0].mtu == 9000)
+        #expect(nads[0].resourceName == nil)
+        // The conflist's first plugin is the one that matters.
+        #expect(nads[1].type == "sriov")
+        #expect(nads[1].vlan == 100)
+        #expect(nads[1].resourceName == "nvidia.com/bf_sf")
+    }
+
+    /// The PCI address is on the pod, in `device-info`, under hyphenated keys.
+    @Test func readsWhatTheCNIGaveThePod() throws {
+        let annotation = """
+        [{"name": "kube-bridge", "interface": "eth0", "ips": ["10.245.0.82"], "mac": "ee:29:3a:4d:e8:8c", "default": true, "dns": {}},
+         {"name": "default/sf-vf", "interface": "net1", "mac": "02:00:00:00:00:0a", "dns": {},
+          "device-info": {"type": "pci", "version": "1.1.0",
+                          "pci": {"pci-address": "0000:03:02.4", "pf-pci-address": "0000:03:00.0"}}}]
+        """
+        let nets = KubeVirt.PodNetwork.parse(annotation)
+        #expect(nets.count == 2)
+        #expect(nets[0].device == nil)
+        #expect(nets[1].interface == "net1")
+        #expect(nets[1].device?.pciAddress == "0000:03:02.4")
+        #expect(nets[1].device?.pfAddress == "0000:03:00.0")
+        #expect(KubeVirt.PodNetwork.parse(nil).isEmpty)
+        #expect(KubeVirt.PodNetwork.parse("not json").isEmpty)
+    }
+
+    /// The row's VF line is the join of three objects: the machine's interface
+    /// says it is a VF, the definition says which resource, the launcher pod
+    /// says which function on which card.
+    @Test func joinsAVirtualFunctionToItsResourceAndAddress() throws {
+        let vmiJSON = """
+        {"metadata": {"name": "gpu-1", "namespace": "default"},
+         "spec": {"domain": {"devices": {"interfaces": [{"name": "default", "masquerade": {}},
+                                                        {"name": "fast", "sriov": {}}]}},
+                  "networks": [{"name": "default", "pod": {}},
+                               {"name": "fast", "multus": {"networkName": "sf-vf"}}]},
+         "status": {"phase": "Running",
+                    "interfaces": [{"name": "default", "ipAddress": "10.245.0.90", "podInterfaceName": "eth0"},
+                                   {"name": "fast", "mac": "02:00:00:00:00:0a", "linkState": "up", "podInterfaceName": "net1"}]}}
+        """
+        let vmi = try KubeClient.decoder.decode(KubeVirt.VirtualMachineInstance.self, from: Data(vmiJSON.utf8))
+        let nad = KubeVirt.NetworkAttachment(namespace: "default", name: "sf-vf", type: "sriov",
+                                             resourceName: "nvidia.com/bf_sf", vlan: 100)
+        let pods = KubeVirt.PodNetwork.parse("""
+        [{"name": "kube-bridge", "interface": "eth0"},
+         {"name": "default/sf-vf", "interface": "net1",
+          "device-info": {"type": "pci", "pci": {"pci-address": "0000:03:02.4", "pf-pci-address": "0000:03:00.0"}}}]
+        """)
+        let machine = KubeVirt.Machine(namespace: "default", name: "gpu-1", vm: nil, vmi: vmi,
+                                       attachments: [nad], podNetworks: pods)
+        let fast = try #require(machine.interfaces.last)
+        #expect(fast.binding == .sriov)
+        #expect(fast.attachment?.resourceName == "nvidia.com/bf_sf")
+        #expect(fast.device?.pciAddress == "0000:03:02.4")
+        #expect(fast.details == ["nvidia.com/bf_sf", "PCI 0000:03:02.4", "PF 0000:03:00.0", "VLAN 100"])
+        // The pod network has nothing to add about the cluster network.
+        #expect(machine.interfaces.first?.details.isEmpty == true)
+    }
+
     @Test func readsThePlatformFacts() throws {
         let vmi = try KubeClient.decoder.decode(KubeVirt.VirtualMachineInstance.self,
                                                 from: Data(Self.vmiJSON.utf8))

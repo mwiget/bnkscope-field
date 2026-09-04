@@ -21,18 +21,23 @@ final class ManagedCluster: Identifiable {
     /// `kubernetes-admin@dpu-cplane-tenant1` says one useful word and eleven
     /// that are the same on every context. The useful word is the cluster, so
     /// that is what is shown — unless the cluster is called something kubeadm
-    /// picked, in which case the file it came from is a better clue than
-    /// "kubernetes" is.
+    /// picked, in which case its address is the one thing that tells it apart.
+    ///
+    /// The file it came from was tried and is worse: after import every cluster
+    /// owns a file named after its context, so a kubeadm cluster came out as
+    /// `kubernetes-admin-kubernetes.kubeconfig`, which is the same eleven words
+    /// again with the file's suffix on the end. Two such clusters on one lab
+    /// read as one name twice; as `host:port` they read as two.
     nonisolated var displayName: String {
         let generic: Set<String> = ["kubernetes", "default", "cluster.local", "kind"]
         let afterAt = context.name.split(separator: "@").last.map(String.init)
         for candidate in [afterAt, context.clusterName].compactMap({ $0 }) {
             if !generic.contains(candidate) { return candidate }
         }
-        let stem = sourceFile.replacingOccurrences(of: ".config", with: "")
-                             .replacingOccurrences(of: ".yaml", with: "")
-                             .replacingOccurrences(of: ".yml", with: "")
-        return stem.isEmpty ? context.name : stem
+        if let host = context.server.host() {
+            return context.server.port.map { "\(host):\($0)" } ?? host
+        }
+        return context.name
     }
 
     enum Reach: Equatable {

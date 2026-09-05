@@ -198,11 +198,29 @@ with `WINDOWS_CERTIFICATE` + password when present), and `apple` (macOS
 runner, **main or `workflow_dispatch` only**: Developer ID signing through
 `Tools/sign-flutter-mac-app.sh`, which signs nested frameworks before the
 bundle, then notarize, staple and `spctl`; iPadOS is compiled unsigned unless
-`IOS_CERTIFICATE`, `IOS_CERTIFICATE_PASSWORD`, `IOS_PROVISIONING_PROFILE`
-and `APPLE_TEAM_ID` exist, in which case the `.ipa` goes to TestFlight with
-the notary key). On `main`, `release` attaches every build to a release
-tagged `app-v<pubspec version>-<run>`. The cheap jobs also run on pushes to
+`IOS_CERTIFICATE`, `IOS_CERTIFICATE_PASSWORD` and `IOS_PROVISIONING_PROFILE`
+exist, in which case the `.ipa` goes to TestFlight with the notary key). On
+`main`, `release` attaches every build to a release tagged
+`app-v<pubspec version>-<run>`. The cheap jobs also run on pushes to
 `flutter-port`. The sign script can be dry-run locally with identity `-`.
+
+Two things the Apple job deliberately does not take as secrets, because the
+repository already holds them: the team is `DEVELOPMENT_TEAM` in both Xcode
+projects, and the App Store Connect key that uploads to TestFlight is the
+same `NOTARY_KEY` that notarizes the Mac app. Only the two an iOS
+distribution build has no Developer ID equivalent for are new.
+
+**Run the Apple job by hand before trusting it.** It is the one job that a
+push to `main` runs for the first time, and it signs, notarizes and
+publishes. `workflow_dispatch` takes a `dry_run` input that builds both
+Apple targets, signs the Mac app ad hoc through the same script and the same
+inside-out order, and then stops: no notarization, no TestFlight upload, no
+release. That exercises everything except the certificates themselves.
+
+The job signs twice, so unlike `macos.yml` it makes the keychain in a step of
+its own and carries the password in `GITHUB_ENV`: importing the second
+identity resets the partition list for every key in the keychain, and setting
+it again needs the password the keychain was created with.
 
 `.github/workflows/macos.yml` — every merge to `main` tests (both
 configurations), builds universal, signs with Developer ID, notarizes, staples

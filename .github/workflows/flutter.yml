@@ -18,6 +18,11 @@ on:
       - .github/workflows/flutter.yml
       - .github/release-notes-flutter.md
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Apple job only: build and ad-hoc sign, no notarization, no upload, no release'
+        type: boolean
+        default: false
 
 permissions:
   contents: write          # to create the release and upload the builds to it
@@ -190,6 +195,13 @@ jobs:
     needs: test
     if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
+    env:
+      # Both Xcode projects already carry the team; a secret would be a second
+      # copy of it to keep in step.
+      APPLE_TEAM_ID: HGECWA98QL
+      # A push has no inputs, so this is 'no' and main always takes the
+      # real path; only workflow_dispatch can ask for the rehearsal.
+      DRY_RUN: ${{ inputs.dry_run && 'yes' || 'no' }}
     steps:
       - uses: actions/checkout@v5
       - name: Use the newest Xcode on the runner
@@ -202,6 +214,27 @@ jobs:
           cache: true
       - name: Resolve the workspace
         run: cd dart && flutter pub get
+
+      # One keychain for both certificates, made here rather than inside a
+      # signing step so that its password outlives that step. macos.yml can
+      # keep the password step-local because it signs exactly once; this job
+      # signs twice, and importing the second identity resets the partition
+      # list for the whole keychain, so it has to be set again with the
+      # password that created the keychain.
+      - name: Create the signing keychain
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" \
+            $(security list-keychains -d user | tr -d '"')
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+          echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> "$GITHUB_ENV"
 
       - name: Build for macOS
         run: cd dart/bnkscope_field && flutter build macos --release
@@ -223,21 +256,32 @@ jobs:
           APP="dart/bnkscope_field/build/macos/Build/Products/Release/bnkscope Field.app"
           ENTITLEMENTS="dart/bnkscope_field/macos/Runner/Release.entitlements"
 
-          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
-          KEYCHAIN_PASSWORD="$(uuidgen)"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          # A dry run proves the build and the inside-out signing order with no
+          # certificate at all: ad hoc, no notarization, nothing published. It
+          # is how this job gets exercised before a merge to main makes it run
+          # for real, which is the only other way it ever runs.
+          if [ "$DRY_RUN" = "yes" ]; then
+            Tools/sign-flutter-mac-app.sh "$APP" - "$ENTITLEMENTS"
+            ditto -c -k --sequesterRsrc --keepParent "$APP" bnkscope-Field-macOS.zip
+            echo "macOS: built and ad-hoc signed, not notarized (dry run)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
           echo "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
-          security import "$RUNNER_TEMP/certificate.p12" -k "$KEYCHAIN" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security import "$RUNNER_TEMP/certificate.p12" -k "$KEYCHAIN" \
+            -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           rm -f "$RUNNER_TEMP/certificate.p12"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
-          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          # Without this codesign would block on a GUI prompt for the key, which
+          # on a runner means hanging until the job times out.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
 
           Tools/sign-flutter-mac-app.sh "$APP" "$SIGNING_IDENTITY" "$ENTITLEMENTS"
 
           echo "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
           ditto -c -k --sequesterRsrc --keepParent "$APP" "$RUNNER_TEMP/notarize.zip"
+          # --wait can return success for a submission Apple rejected, so the
+          # status is read rather than inferred from the exit code.
           set +e
           RESULT=$(xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
             --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
@@ -262,34 +306,39 @@ jobs:
           grep -q "source=Notarized Developer ID" /tmp/spctl.txt
           ditto -c -k --sequesterRsrc --keepParent "$APP" bnkscope-Field-macOS.zip
 
-      # iPadOS cannot be sideloaded, so the build goes to TestFlight, and it
-      # needs three things the Mac build does not: an Apple Distribution
-      # certificate, a provisioning profile for the bundle id, and the team.
-      # Without them the target is still compiled, unsigned, so a change that
-      # breaks the iOS build is caught here rather than on the day of the
-      # first TestFlight.
+      # iPadOS cannot be sideloaded, so the build goes to TestFlight. Two of
+      # the three things that needs are already in the repository: the team
+      # comes from the Xcode projects and the App Store Connect key is the one
+      # that notarizes the Mac app. Only the pair that a Developer ID has no
+      # equivalent for is new — an Apple Distribution certificate and a
+      # provisioning profile for the bundle id. Without them the target is
+      # still compiled, unsigned, so a change that breaks the iOS build is
+      # caught here rather than on the day of the first TestFlight.
       - name: Build for iPadOS
         env:
           IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
           IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
           IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
         run: |
           set -euo pipefail
           cd dart/bnkscope_field
-          if [ -z "$IOS_CERTIFICATE" ] || [ -z "$IOS_PROVISIONING_PROFILE" ] || [ -z "$APPLE_TEAM_ID" ]; then
+          if [ "$DRY_RUN" = "yes" ] || [ -z "$IOS_CERTIFICATE" ] || [ -z "$IOS_PROVISIONING_PROFILE" ]; then
             flutter build ios --release --no-codesign
-            echo "iPadOS: compiled but not signed or uploaded; set IOS_CERTIFICATE, IOS_CERTIFICATE_PASSWORD, IOS_PROVISIONING_PROFILE and APPLE_TEAM_ID for TestFlight" >> "$GITHUB_STEP_SUMMARY"
+            echo "iPadOS: compiled but not signed or uploaded; set IOS_CERTIFICATE, IOS_CERTIFICATE_PASSWORD and IOS_PROVISIONING_PROFILE for TestFlight" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
           echo "$IOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/ios.p12"
-          security import "$RUNNER_TEMP/ios.p12" -k "$KEYCHAIN" -P "$IOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security import "$RUNNER_TEMP/ios.p12" -k "$KEYCHAIN" \
+            -P "$IOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           rm -f "$RUNNER_TEMP/ios.p12"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$(uuidgen)" "$KEYCHAIN" > /dev/null || true
+          # The import above reset the partition list for every key in the
+          # keychain, the Developer ID one included, so it is set again with
+          # the password that created the keychain.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           echo "$IOS_PROVISIONING_PROFILE" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/field.mobileprovision
           PROFILE_NAME=$(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/field.mobileprovision | plutil -extract Name raw -)
@@ -326,7 +375,7 @@ jobs:
   # app's own version and the run number so every push is downloadable.
   release:
     needs: [android, linux, windows, apple]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && !inputs.dry_run
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

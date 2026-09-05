@@ -68,7 +68,23 @@ Where each target can be built: **macOS, iOS and Android on a Mac**, **Linux
 only on Linux** (`lake1`, which has Flutter under `~/flutter`), **Windows
 only on Windows** — the desktop embedders compile against the host's own
 toolchain and none of them cross-compiles, so CI is the only place Windows
-is built at all. The Mac also needs CocoaPods, because `file_picker` and
+is built at all.
+
+Built there, but not only testable there: the Windows zip runs under Wine on
+`asus`, which has wine and a `~/.wine-bnkscope` prefix kept for it. The app
+renders through vkd3d, and the `d3d11`/`dxgi` lines it prints are `fixme`
+notices, not failures.
+
+```bash
+gh run download <run id> -R mwiget/bnkscope-field -n windows
+unzip -q bnkscope-Field-windows.zip -d app && cd app
+WINEPREFIX=$HOME/.wine-bnkscope xvfb-run -a wine bnkscope_field.exe
+```
+
+Wine on an Apple Silicon Mac is not a second option today: every WineHQ cask
+was disabled on 2026-09-01 for failing the Gatekeeper check, Whisky is
+unmaintained, and the x86_64 Wine builds would need Rosetta under an arm64
+host anyway. The Mac also needs CocoaPods, because `file_picker` and
 `path_provider` carry native code:
 
 ```bash

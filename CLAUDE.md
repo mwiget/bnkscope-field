@@ -84,11 +84,23 @@ WINEPREFIX=$HOME/.wine-bnkscope xvfb-run -a wine bnkscope_field.exe
 Wine on an Apple Silicon Mac is not a second option today: every WineHQ cask
 was disabled on 2026-09-01 for failing the Gatekeeper check, Whisky is
 unmaintained, and the x86_64 Wine builds would need Rosetta under an arm64
-host anyway. The arm64 half is tested in a **Windows 11 ARM64 VM under UTM**
-on the Mac instead — ARM on ARM, so it is virtualised rather than emulated.
-Nothing needs building inside it: CI produces the arm64 binary and the VM
-only runs it, the same division that lets `asus` test x64 without a Windows
-toolchain. The Mac also needs CocoaPods, because `file_picker` and
+host anyway. A **Windows 11 ARM64 VM under UTM** on the Mac is the second
+place to run it — virtualised rather than emulated, since it is ARM on ARM —
+and what it runs is the same x64 zip, under Windows on ARM's own x86-64
+emulation. Nothing is built inside it.
+
+**There is no native Windows arm64 build, and it is not an oversight.**
+`flutter build windows` takes its target architecture from the ABI of the
+Dart VM running the tool and offers no `--target-platform` to override it, so
+an arm64 binary needs an arm64 Windows Flutter SDK. None exists:
+`releases_windows.json` lists 189 stable releases and every one is x64, while
+the macOS manifest does carry arm64. `flutter_tools` has `windows_arm64`
+throughout, which makes this look supported until you try it — a
+`windows-11-arm` CI leg failed in `flutter-action` with "Unable to determine
+Flutter version for channel: stable version: 3.47.2 architecture: arm64".
+The runner label works; the SDK is what is missing. Which is why the x64
+build under emulation is the thing worth testing on ARM Windows: it is what
+those users run regardless. The Mac also needs CocoaPods, because `file_picker` and
 `path_provider` carry native code:
 
 ```bash
@@ -241,10 +253,8 @@ port: a Linux `test` job (both packages and the widget tests, with
 keystore from `ANDROID_KEYSTORE` + password, alias and key password, debug
 key otherwise), `linux` (Linux; a tarball of the GTK bundle, unsigned, and
 the only job that compiles `linux/` at all — the widget tests run headless),
-`windows` (a matrix of two: `windows-latest` for x64 and `windows-11-arm`
-for a native arm64 build, each a zip of its own Release folder, signed with
-`WINDOWS_CERTIFICATE` + password when present; the legs do not fail-fast,
-so the newer arm64 runner cannot take x64 down with it), and `apple` (macOS
+`windows` (Windows runner, x64 only — see below; zip of the Release folder,
+signed with `WINDOWS_CERTIFICATE` + password when present), and `apple` (macOS
 runner, **main or `workflow_dispatch` only**: Developer ID signing through
 `Tools/sign-flutter-mac-app.sh`, which signs nested frameworks before the
 bundle, then notarize, staple and `spctl`; iPadOS is compiled unsigned unless

@@ -89,6 +89,24 @@ place to run it — virtualised rather than emulated, since it is ARM on ARM —
 and what it runs is the same x64 zip, under Windows on ARM's own x86-64
 emulation. Nothing is built inside it.
 
+Driving that VM from the Mac, which is less obvious than it should be:
+`utmctl exec` is a dead end on a Windows guest — it returns 0 and runs
+nothing — but `utmctl file push`/`pull` do work, including for binaries, and
+are enough to bootstrap. Windows firewalls a fresh network as Public, so
+enabling sshd is not enough on its own; the profile has to be moved to
+Private or nothing answers, ICMP included. And a GUI app started over ssh
+lands on a hidden window station, alive but with no window: to put it on the
+real desktop, register it with `schtasks /it` and run that. A screenshot
+taken by the same task lands on the interactive desktop too, and comes back
+out through `utmctl file pull`.
+
+```bash
+utmctl ip-address Win11
+utmctl file push Win11 'C:\Users\Public\shot.ps1' < shot.ps1
+ssh -l '<user>' 192.168.64.2 'schtasks /create /tn t /tr "..." /sc once /st 00:00 /it /f'
+utmctl file pull Win11 'C:\Users\Public\shot.png' > shot.png
+```
+
 **There is no native Windows arm64 build, and it is not an oversight.**
 `flutter build windows` takes its target architecture from the ABI of the
 Dart VM running the tool and offers no `--target-platform` to override it, so

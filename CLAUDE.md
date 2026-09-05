@@ -76,15 +76,19 @@ renders through vkd3d, and the `d3d11`/`dxgi` lines it prints are `fixme`
 notices, not failures.
 
 ```bash
-gh run download <run id> -R mwiget/bnkscope-field -n windows
-unzip -q bnkscope-Field-windows.zip -d app && cd app
+gh run download <run id> -R mwiget/bnkscope-field -n windows-x64
+unzip -q bnkscope-Field-windows-x64.zip -d app && cd app
 WINEPREFIX=$HOME/.wine-bnkscope xvfb-run -a wine bnkscope_field.exe
 ```
 
 Wine on an Apple Silicon Mac is not a second option today: every WineHQ cask
 was disabled on 2026-09-01 for failing the Gatekeeper check, Whisky is
 unmaintained, and the x86_64 Wine builds would need Rosetta under an arm64
-host anyway. The Mac also needs CocoaPods, because `file_picker` and
+host anyway. The arm64 half is tested in a **Windows 11 ARM64 VM under UTM**
+on the Mac instead — ARM on ARM, so it is virtualised rather than emulated.
+Nothing needs building inside it: CI produces the arm64 binary and the VM
+only runs it, the same division that lets `asus` test x64 without a Windows
+toolchain. The Mac also needs CocoaPods, because `file_picker` and
 `path_provider` carry native code:
 
 ```bash
@@ -237,8 +241,10 @@ port: a Linux `test` job (both packages and the widget tests, with
 keystore from `ANDROID_KEYSTORE` + password, alias and key password, debug
 key otherwise), `linux` (Linux; a tarball of the GTK bundle, unsigned, and
 the only job that compiles `linux/` at all — the widget tests run headless),
-`windows` (Windows runner; zip of the Release folder, signed
-with `WINDOWS_CERTIFICATE` + password when present), and `apple` (macOS
+`windows` (a matrix of two: `windows-latest` for x64 and `windows-11-arm`
+for a native arm64 build, each a zip of its own Release folder, signed with
+`WINDOWS_CERTIFICATE` + password when present; the legs do not fail-fast,
+so the newer arm64 runner cannot take x64 down with it), and `apple` (macOS
 runner, **main or `workflow_dispatch` only**: Developer ID signing through
 `Tools/sign-flutter-mac-app.sh`, which signs nested frameworks before the
 bundle, then notarize, staple and `spctl`; iPadOS is compiled unsigned unless

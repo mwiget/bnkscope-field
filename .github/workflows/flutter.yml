@@ -143,9 +143,23 @@ jobs:
           path: bnkscope-Field-linux-x64.tar.gz
           if-no-files-found: error
 
+  # Both Windows architectures. x64 is what almost everyone runs; arm64 is a
+  # native build for Windows on ARM, which is also the only Windows binary
+  # that could ever run on an Apple Silicon Mac without emulation. The legs
+  # are independent — fail-fast off — because the arm64 runner is the newer
+  # of the two and a problem with it should not take the x64 build down.
   windows:
     needs: test
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            arch: x64
+          - runner: windows-11-arm
+            arch: arm64
+    name: windows-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
       - uses: subosito/flutter-action@v2
@@ -154,11 +168,15 @@ jobs:
           cache: true
       - name: Resolve the workspace
         run: cd dart; flutter pub get
+      # Flutter builds for the architecture of the host it runs on, and puts
+      # the result under a directory named for it.
       - name: Build
         run: cd dart/bnkscope_field; flutter build windows --release
       # Authenticode. Without a certificate the app runs, but SmartScreen
       # warns on first launch until enough machines have run it; a standard
       # code-signing certificate quiets that over time, an EV one at once.
+      # The x64 signtool is used on both runners: ARM64 Windows runs it
+      # emulated, and the signature it produces is the same either way.
       - name: Sign
         if: ${{ env.WINDOWS_CERTIFICATE != '' }}
         env:
@@ -171,24 +189,23 @@ jobs:
           $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
             Where-Object { $_.FullName -match "x64" } | Select-Object -Last 1 -ExpandProperty FullName
           & $signtool sign /f $pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
-            "dart\bnkscope_field\build\windows\x64\runner\Release\bnkscope_field.exe"
+            "dart\bnkscope_field\build\windows\${{ matrix.arch }}\runner\Release\bnkscope_field.exe"
           Remove-Item $pfx
-          "signed with the Authenticode certificate" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          "signed with the Authenticode certificate (${{ matrix.arch }})" | Out-File -Append $env:GITHUB_STEP_SUMMARY
       - name: Note the missing certificate
         if: ${{ env.WINDOWS_CERTIFICATE == '' }}
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
         shell: pwsh
-        run: '"no WINDOWS_CERTIFICATE secret: the build is unsigned and SmartScreen will warn on first launch" | Out-File -Append $env:GITHUB_STEP_SUMMARY'
+        run: '"no WINDOWS_CERTIFICATE secret: the ${{ matrix.arch }} build is unsigned and SmartScreen will warn on first launch" | Out-File -Append $env:GITHUB_STEP_SUMMARY'
       - name: Package
         shell: pwsh
-        run: Compress-Archive -Path "dart\bnkscope_field\build\windows\x64\runner\Release\*" -DestinationPath "bnkscope-Field-windows.zip"
+        run: Compress-Archive -Path "dart\bnkscope_field\build\windows\${{ matrix.arch }}\runner\Release\*" -DestinationPath "bnkscope-Field-windows-${{ matrix.arch }}.zip"
       - uses: actions/upload-artifact@v4
         with:
-          name: windows
-          path: bnkscope-Field-windows.zip
+          name: windows-${{ matrix.arch }}
+          path: bnkscope-Field-windows-${{ matrix.arch }}.zip
           if-no-files-found: error
-
   # macOS and iPadOS together: one expensive runner, one Xcode selection.
   # Only on main or by hand, for the cost reason at the top.
   apple:

@@ -48,7 +48,7 @@ package, and a platform check is allowed only in the view layer's one shim.
 
 ```bash
 brew install --cask flutter            # brings the Dart SDK
-cd dart && dart pub get && dart analyze
+cd dart && flutter pub get && dart analyze --fatal-infos
 (cd bnk_kit && dart test)              # 71 cases
 (cd bnk_engines && dart test)          # 27 cases, engines driven through the fake apiserver
 (cd bnkscope_field && flutter analyze && flutter test && flutter build macos --debug)   # 9 widget tests, four of them against the fake apiserver
@@ -56,6 +56,34 @@ cd dart && dart pub get && dart analyze
 dart run bnk_kit/bin/bnkfield.dart probe <kubeconfig> <context>
 (cd bnk_kit && dart compile exe bin/bnkfield.dart -o bnkfield)
 ```
+
+`flutter pub get`, not `dart pub get`, at the workspace root: the workspace
+contains `bnkscope_field`, so plain `dart pub get` cannot resolve
+`flutter_test` and fails with "the Flutter SDK is not available" — and then
+`dart analyze` reports thousands of unresolved-symbol issues that are only
+the failed resolve. The two pure-Dart packages still run under plain
+`dart test` once the workspace has been resolved once.
+
+Where each target can be built: **macOS, iOS and Android on a Mac**, **Linux
+only on Linux** (`lake1`, which has Flutter under `~/flutter`), **Windows
+only on Windows** — the desktop embedders compile against the host's own
+toolchain and none of them cross-compiles, so CI is the only place Windows
+is built at all. The Mac also needs CocoaPods, because `file_picker` and
+`path_provider` carry native code:
+
+```bash
+brew install cocoapods openjdk@17
+brew install --cask android-commandlinetools
+export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
+yes | sdkmanager --sdk_root="$ANDROID_HOME" --licenses
+sdkmanager --sdk_root="$ANDROID_HOME" platform-tools "platforms;android-36" "build-tools;36.0.0"
+flutter config --android-sdk "$ANDROID_HOME" --jdk-dir /opt/homebrew/opt/openjdk@17
+(cd bnkscope_field && flutter build apk --release)     # debug-signed without key.properties
+```
+
+`openjdk@17` is keg-only, so `flutter config --jdk-dir` is what points
+Gradle at it; AGP 9.1.0 and Kotlin 2.4.0 both want 17. The Gradle build
+installs `platforms;android-35` and `cmake;3.22.1` on its own the first time.
 
 Widget tests that need real sockets (`test/tmm_live_test.dart`) lift the
 test binding's HttpClient override and advance fake time with

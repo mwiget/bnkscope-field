@@ -31,7 +31,7 @@ packages, no Flutter dependency in either, so everything below runs with
   `DpuEngine`, `ScreenNavigator`). Each mutates its fields and calls
   `notify()`; a view rebuilds on `changes`. Platform wording (`this iPad`,
   where the privacy switch lives) comes in as `DeviceWords` from the app.
-- `bnkscope_field` is the Flutter app (iOS, Android, macOS, Windows).
+- `bnkscope_field` is the Flutter app (iOS, Android, macOS, Windows, Linux).
   `lib/platform.dart` is the *entire* platform divergence, the Flutter
   `Portable.swift`; `lib/observe.dart` is the one adapter from an engine's
   `changes` stream to a widget rebuild; `lib/theme.dart` carries the web
@@ -52,6 +52,7 @@ cd dart && dart pub get && dart analyze
 (cd bnk_kit && dart test)              # 71 cases
 (cd bnk_engines && dart test)          # 27 cases, engines driven through the fake apiserver
 (cd bnkscope_field && flutter analyze && flutter test && flutter build macos --debug)   # 9 widget tests, four of them against the fake apiserver
+(cd bnkscope_field && flutter build linux --debug)     # needs clang, cmake, ninja, libgtk-3-dev
 dart run bnk_kit/bin/bnkfield.dart probe <kubeconfig> <context>
 (cd bnk_kit && dart compile exe bin/bnkfield.dart -o bnkfield)
 ```
@@ -190,7 +191,9 @@ Two workflows. `.github/workflows/flutter.yml` is the matrix for the Dart
 port: a Linux `test` job (both packages and the widget tests, with
 `dart analyze --fatal-infos`), then `android` (Linux; APK and AAB, release
 keystore from `ANDROID_KEYSTORE` + password, alias and key password, debug
-key otherwise), `windows` (Windows runner; zip of the Release folder, signed
+key otherwise), `linux` (Linux; a tarball of the GTK bundle, unsigned, and
+the only job that compiles `linux/` at all — the widget tests run headless),
+`windows` (Windows runner; zip of the Release folder, signed
 with `WINDOWS_CERTIFICATE` + password when present), and `apple` (macOS
 runner, **main or `workflow_dispatch` only**: Developer ID signing through
 `Tools/sign-flutter-mac-app.sh`, which signs nested frameworks before the

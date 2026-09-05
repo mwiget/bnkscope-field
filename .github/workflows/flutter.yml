@@ -103,6 +103,41 @@ jobs:
             dart/bnkscope_field/bnkscope-Field-android.aab
           if-no-files-found: error
 
+  # Linux is the runner the tests already use, so this build is the cheapest
+  # of the four. It earns its place anyway: the widget tests run headless and
+  # never touch linux/, so a break in the GTK runner would otherwise surface
+  # only on someone's desktop. Nothing is signed - a Linux desktop build ships
+  # as a tarball and nothing on the far side checks a signature.
+  linux:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # The runner has clang and pkg-config; the GTK headers and the two
+      # generators Flutter drives are not there by default.
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Resolve the workspace
+        run: cd dart && flutter pub get
+      - name: Build
+        run: cd dart/bnkscope_field && flutter build linux --release
+      # The bundle is the unit that runs: the binary alongside lib/ and data/.
+      - name: Package
+        run: |
+          tar czf bnkscope-Field-linux-x64.tar.gz \
+            -C dart/bnkscope_field/build/linux/x64/release/bundle .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: bnkscope-Field-linux-x64.tar.gz
+          if-no-files-found: error
+
   windows:
     needs: test
     runs-on: windows-latest
@@ -290,7 +325,7 @@ jobs:
   # One release with every platform's build, on main only, tagged from the
   # app's own version and the run number so every push is downloadable.
   release:
-    needs: [android, windows, apple]
+    needs: [android, linux, windows, apple]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
